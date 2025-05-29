@@ -93,7 +93,6 @@
             </div>
         </form>
 
-        <!-- YouTube Stream Section -->
         <div class="tab-pane fade" id="youtube" role="tabpanel" aria-labelledby="youtube-tab">
             <div class="card">
                 <div class="card-body">
@@ -154,7 +153,6 @@
     </div>
 
     <script>
-        // YouTube Stream Form Handler
         document.getElementById('youtubeForm').addEventListener('submit', async function (e) {
             e.preventDefault();
 
@@ -164,7 +162,6 @@
             const video = document.getElementById('youtubeVideo');
             const downloadBtn = document.getElementById('youtubeDownload');
 
-            // Show progress
             progress.classList.remove('d-none');
             result.classList.add('d-none');
 
@@ -178,10 +175,9 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Show result
                     const source = video.querySelector('source');
                     source.src = data.video_url;
-                    video.load(); // Reload video element
+                    video.load();
                     downloadBtn.href = data.video_url;
                     result.classList.remove('d-none');
                 } else {
