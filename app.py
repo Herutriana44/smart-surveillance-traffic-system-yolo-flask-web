@@ -1,10 +1,11 @@
 import os
 import re
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 from process_video import process_video
 from process_youtube import process_youtube_stream
 from pyngrok import ngrok
+from datetime import datetime
 
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'static/processed'
@@ -91,6 +92,72 @@ def result(filename):
 @app.route('/download/<filename>')
 def download_file(filename):
     return send_from_directory(app.config['PROCESSED_FOLDER'], filename, as_attachment=True)
+
+@app.route('/process_youtube', methods=['POST'])
+def process_youtube():
+    if 'youtube_url' not in request.form:
+        return jsonify({'error': 'No YouTube URL provided'}), 400
+    
+    youtube_url = request.form['youtube_url']
+    quality = request.form.get('quality', '720p')
+    browser = request.form.get('browser', 'chrome')  # Default to Chrome
+    
+    if not youtube_url:
+        return jsonify({'error': 'Empty YouTube URL'}), 400
+    
+    # Handle cookies file upload
+    cookies_file = None
+    if 'cookies_file' in request.files:
+        cookies = request.files['cookies_file']
+        if cookies.filename:
+            # Save cookies file temporarily
+            cookies_path = os.path.join(app.config['UPLOAD_FOLDER'], 'cookies.txt')
+            cookies.save(cookies_path)
+            cookies_file = cookies_path
+    
+    # Create output directory if it doesn't exist
+    output_dir = os.path.join(app.static_folder, 'output')
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate unique output filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_filename = f'youtube_output_{timestamp}.mp4'
+    output_path = os.path.join(output_dir, output_filename)
+    
+    try:
+        # Process the YouTube stream
+        success = process_youtube_stream(
+            youtube_url=youtube_url,
+            output_path=output_path,
+            quality=quality,
+            browser=browser,
+            cookies_file=cookies_file
+        )
+        
+        if success:
+            # Return the URL for the processed video
+            video_url = url_for('static', filename=f'output/{output_filename}')
+            return jsonify({
+                'success': True,
+                'video_url': video_url,
+                'message': 'Video processed successfully'
+            })
+        else:
+            return jsonify({
+                'error': 'Failed to process YouTube stream. Please check the URL and try again.'
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'error': f'Error processing video: {str(e)}'
+        }), 500
+    finally:
+        # Clean up cookies file if it was uploaded
+        if cookies_file and os.path.exists(cookies_file):
+            try:
+                os.remove(cookies_file)
+            except:
+                pass
 
 if __name__ == '__main__':
     # Only for Colab: start ngrok tunnel

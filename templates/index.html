@@ -92,7 +92,103 @@
                 <button type="submit">Upload & Proses</button>
             </div>
         </form>
+
+        <!-- YouTube Stream Section -->
+        <div class="tab-pane fade" id="youtube" role="tabpanel" aria-labelledby="youtube-tab">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Process YouTube Stream</h5>
+                    <form id="youtubeForm" class="mb-4">
+                        <div class="mb-3">
+                            <label for="youtubeUrl" class="form-label">YouTube URL</label>
+                            <input type="url" class="form-control" id="youtubeUrl" name="youtube_url" required
+                                placeholder="https://www.youtube.com/watch?v=...">
+                        </div>
+                        <div class="mb-3">
+                            <label for="youtubeQuality" class="form-label">Video Quality</label>
+                            <select class="form-select" id="youtubeQuality" name="quality">
+                                <option value="360p">360p</option>
+                                <option value="480p">480p</option>
+                                <option value="720p" selected>720p</option>
+                                <option value="1080p">1080p</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="browserSelect" class="form-label">Browser for Authentication</label>
+                            <select class="form-select" id="browserSelect" name="browser">
+                                <option value="chrome" selected>Google Chrome</option>
+                                <option value="firefox">Mozilla Firefox</option>
+                                <option value="edge">Microsoft Edge</option>
+                            </select>
+                            <div class="form-text">Select the browser where you're logged into YouTube</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="cookiesFile" class="form-label">Or Upload Cookies File (Optional)</label>
+                            <input type="file" class="form-control" id="cookiesFile" name="cookies_file" accept=".txt">
+                            <div class="form-text">
+                                Upload a cookies.txt file in Netscape format. You can export cookies from your browser
+                                using extensions like "Get cookies.txt" for Chrome.
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Process Stream</button>
+                    </form>
+                    <div id="youtubeProgress" class="progress mb-3 d-none">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                            style="width: 100%"></div>
+                    </div>
+                    <div id="youtubeResult" class="d-none">
+                        <h6>Processed Video:</h6>
+                        <video id="youtubeVideo" class="img-fluid mb-3" controls></video>
+                        <div class="d-grid gap-2">
+                            <a id="youtubeDownload" href="#" class="btn btn-success" download>
+                                <i class="fas fa-download"></i> Download Processed Video
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        // YouTube Stream Form Handler
+        document.getElementById('youtubeForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const form = e.target;
+            const progress = document.getElementById('youtubeProgress');
+            const result = document.getElementById('youtubeResult');
+            const video = document.getElementById('youtubeVideo');
+            const downloadBtn = document.getElementById('youtubeDownload');
+
+            // Show progress
+            progress.classList.remove('d-none');
+            result.classList.add('d-none');
+
+            try {
+                const formData = new FormData(form);
+                const response = await fetch('/process_youtube', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Show result
+                    video.src = data.video_url;
+                    downloadBtn.href = data.video_url;
+                    result.classList.remove('d-none');
+                } else {
+                    alert(data.error || 'Failed to process YouTube stream');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                progress.classList.add('d-none');
+            }
+        });
+    </script>
 </body>
 
 </html>

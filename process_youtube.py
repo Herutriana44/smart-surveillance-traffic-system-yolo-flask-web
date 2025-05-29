@@ -5,6 +5,7 @@ import time
 import yt_dlp
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from models.common import DetectMultiBackend, AutoShape
+import os
 
 # Area ROI dan parameter lain
 area1 = [(830,280),(830,470),(90,470),(90,280)]
@@ -33,15 +34,33 @@ def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness
     cv2.line(img, (x1, y1), (x1, y1 - line_length), line_color, line_thickness)
     return img
 
-def get_youtube_stream_url(youtube_url, quality='720p'):
-    """Extract direct stream URL from YouTube using yt-dlp"""
+def get_youtube_stream_url(youtube_url, quality='720p', browser='chrome', cookies_file=None):
+    """Extract direct stream URL from YouTube using yt-dlp with browser cookies"""
     print(f"🔍 Extracting stream URL from YouTube...")
+    
+    # Get the user's home directory
+    home_dir = os.path.expanduser("~")
+    
+    # Define possible browser cookie paths
+    cookie_paths = {
+        'chrome': os.path.join(home_dir, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies'),
+        'firefox': os.path.join(home_dir, 'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles'),
+        'edge': os.path.join(home_dir, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies')
+    }
     
     ydl_opts = {
         'format': f'best[height<={quality[:-1]}]/best',
         'quiet': True,
         'no_warnings': True,
     }
+    
+    # Add cookies options
+    if cookies_file and os.path.exists(cookies_file):
+        print(f"Using cookies from file: {cookies_file}")
+        ydl_opts['cookiefile'] = cookies_file
+    else:
+        print(f"Using cookies from browser: {browser}")
+        ydl_opts['cookiesfrombrowser'] = (browser,)
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -56,21 +75,30 @@ def get_youtube_stream_url(youtube_url, quality='720p'):
                 return None
     except Exception as e:
         print(f"❌ Error extracting YouTube URL: {str(e)}")
+        print("\nTroubleshooting tips:")
+        print("1. Make sure you're logged into YouTube in your browser")
+        print("2. Try using a different browser (chrome/firefox/edge)")
+        print("3. If using Chrome, try closing all Chrome windows first")
+        print("4. Check if your browser's cookies are accessible")
+        print("5. If using cookies file, make sure it exists and is in Netscape format")
         return None
 
 def process_youtube_stream(youtube_url, output_path=None, weights_path='./weights/yolov9-c.pt', 
-                         classes_path='../configs/coco.names', quality='720p', max_frames=300):
+                         classes_path='../configs/coco.names', quality='720p', max_frames=300,
+                         browser='chrome', cookies_file=None):
     """
     Process YouTube stream and save to file
     max_frames: Maximum number of frames to process (default: 300 frames = ~10 seconds at 30fps)
+    browser: Browser to use for cookies (chrome/firefox/edge)
+    cookies_file: Path to cookies.txt file in Netscape format
     """
     count_v = 0
     vihicle_run_time = {}
     vihicle_in_roi = {}
     frame_count = 0
 
-    # Get YouTube stream URL
-    stream_url = get_youtube_stream_url(youtube_url, quality)
+    # Get YouTube stream URL with browser cookies
+    stream_url = get_youtube_stream_url(youtube_url, quality, browser, cookies_file)
     if not stream_url:
         return False
 
