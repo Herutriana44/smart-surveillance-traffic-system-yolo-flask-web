@@ -6,6 +6,7 @@ from process_video import process_video
 from process_youtube import process_youtube_stream
 from pyngrok import ngrok
 from datetime import datetime
+import uuid
 
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'static/processed'
@@ -48,11 +49,14 @@ def upload_file():
             filename = secure_filename(file.filename)
             input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(input_path)
-            output_filename = 'processed_' + filename
-            output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
-            # Proses video
-            process_video(input_path, output_path)
-            return redirect(url_for('result', filename=output_filename))
+            
+            # Process video and get unique output filename
+            success, output_filename = process_video(input_path, app.config['PROCESSED_FOLDER'])
+            
+            if success:
+                return redirect(url_for('result', filename=output_filename))
+            else:
+                return render_template('index.html', error='Error processing video')
     return render_template('index.html')
 
 @app.route('/youtube', methods=['GET', 'POST'])
@@ -121,7 +125,8 @@ def process_youtube():
     
     # Generate unique output filename
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_filename = f'youtube_output_{timestamp}.mp4'
+    unique_id = str(uuid.uuid4())[:8]
+    output_filename = f'youtube_output_{timestamp}_{unique_id}.mp4'
     output_path = os.path.join(output_dir, output_filename)
     
     try:

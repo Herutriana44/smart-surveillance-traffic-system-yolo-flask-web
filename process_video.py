@@ -6,6 +6,8 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from models.common import DetectMultiBackend, AutoShape
 import subprocess
 import os
+import uuid
+from datetime import datetime
 
 # Area ROI dan parameter lain
 area1 = [(830,280),(830,470),(90,470),(90,280)]
@@ -34,6 +36,25 @@ def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness
     cv2.line(img, (x1, y1), (x1 - line_length, y1), line_color, line_thickness)
     cv2.line(img, (x1, y1), (x1, y1 - line_length), line_color, line_thickness)
     return img
+
+
+def generate_unique_filename(original_filename):
+    """
+    Generate a unique filename using timestamp and UUID
+    """
+    # Get file extension
+    _, ext = os.path.splitext(original_filename)
+    
+    # Generate timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Generate random UUID (8 characters)
+    unique_id = str(uuid.uuid4())[:8]
+    
+    # Combine all parts
+    new_filename = f'processed_{timestamp}_{unique_id}{ext}'
+    
+    return new_filename
 
 
 def convert_video_for_web(input_path, output_path):
@@ -66,18 +87,25 @@ def convert_video_for_web(input_path, output_path):
         return False
 
 
-def process_video(input_path, output_path):
+def process_video(input_path, output_dir):
+    """
+    Process video and save with unique filename
+    Returns: (success, output_filename)
+    """
     count_v = 0
     vihicle_run_time = {}
     vihicle_in_roi = {}
 
-    # Create temporary output path for processed video
+    # Generate unique output filename
+    input_filename = os.path.basename(input_path)
+    output_filename = generate_unique_filename(input_filename)
+    output_path = os.path.join(output_dir, output_filename)
     temp_output = output_path + '.temp.mp4'
     
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         print("Error: Could not open video file")
-        return False
+        return False, None
 
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -173,7 +201,7 @@ def process_video(input_path, output_path):
 
     except Exception as e:
         print(f"Error during processing: {str(e)}")
-        return False
+        return False, None
     finally:
         cap.release()
         writer.release()
@@ -187,7 +215,7 @@ def process_video(input_path, output_path):
             except:
                 pass
             print("Video processing completed successfully")
-            return True
+            return True, output_filename
         else:
             print("Error converting video to web format")
-            return False 
+            return False, None 
