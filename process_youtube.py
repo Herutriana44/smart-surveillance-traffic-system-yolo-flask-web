@@ -111,11 +111,14 @@ def process_youtube_stream(youtube_url, output_path=None, weights_path='./weight
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
 
-    # Setup video writer
+    # Setup video writer with H.264 codec
     if not output_path:
         output_path = 'output.mp4'
+    
+    # Create temporary file for initial processing
+    temp_output = output_path + '.temp.mp4'
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+    writer = cv2.VideoWriter(temp_output, fourcc, fps, (frame_width, frame_height))
 
     print("Loading YOLOv9 model...")
     tracker = DeepSort(max_age=50)
@@ -212,6 +215,30 @@ def process_youtube_stream(youtube_url, output_path=None, weights_path='./weight
     finally:
         cap.release()
         writer.release()
-        print(f"✅ Processing completed. Saved {frame_count} frames to {output_path}")
+        print(f"✅ Processing completed. Converting to web-compatible format...")
+        
+        # Convert to web-compatible format using ffmpeg
+        try:
+            import subprocess
+            # Use H.264 codec with web-compatible settings
+            command = [
+                'ffmpeg', '-y',
+                '-i', temp_output,
+                '-c:v', 'libx264',
+                '-preset', 'medium',
+                '-crf', '23',
+                '-movflags', '+faststart',
+                '-pix_fmt', 'yuv420p',
+                output_path
+            ]
+            subprocess.run(command, check=True)
+            # Remove temporary file
+            os.remove(temp_output)
+            print(f"✅ Video converted successfully to {output_path}")
+        except Exception as e:
+            print(f"❌ Error converting video: {str(e)}")
+            # If conversion fails, use the original file
+            os.rename(temp_output, output_path)
+            print("⚠️ Using original video file (may not be web-compatible)")
     
     return True 
