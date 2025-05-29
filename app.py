@@ -1,11 +1,15 @@
 import os
 import re
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, Response
 from werkzeug.utils import secure_filename
 from process_video import process_video
 from process_youtube import process_youtube_stream
 from pyngrok import ngrok
 from datetime import datetime
+import mimetypes
+
+# Register MP4 MIME type
+mimetypes.add_type('video/mp4', '.mp4')
 
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'static/processed'
@@ -17,6 +21,7 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 
 
 def allowed_file(filename):
@@ -36,6 +41,11 @@ def extract_youtube_id(url):
             return match.group(1)
     return None
 
+@app.route('/video/<filename>')
+def video_file(filename):
+    """Stream video file with proper MIME type"""
+    return send_from_directory(app.config['PROCESSED_FOLDER'], filename, mimetype='video/mp4')
+
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
@@ -48,11 +58,22 @@ def upload_file():
             filename = secure_filename(file.filename)
             input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(input_path)
-            output_filename = 'processed_' + filename
+            
+            # Generate output filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_filename = f'processed_{timestamp}_{filename}'
             output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
-            # Proses video
-            process_video(input_path, output_path)
-            return redirect(url_for('result', filename=output_filename))
+            
+            # Process video
+            if process_video(input_path, output_path):
+                # Clean up input file
+                try:
+                    os.remove(input_path)
+                except:
+                    pass
+                return redirect(url_for('result', filename=output_filename))
+            else:
+                return render_template('index.html', error='Error processing video')
     return render_template('index.html')
 
 @app.route('/youtube', methods=['GET', 'POST'])
@@ -75,7 +96,7 @@ def youtube_stream():
         if not success:
             return render_template('youtube.html', error='Failed to process YouTube stream')
         
-        processed_url = url_for('static', filename=f'processed/{output_filename}')
+        processed_url = url_for('video_file', filename=output_filename)
         return render_template('youtube.html', 
                              youtube_url=youtube_url,
                              youtube_id=youtube_id,
@@ -85,7 +106,7 @@ def youtube_stream():
 
 @app.route('/result/<filename>')
 def result(filename):
-    video_url = url_for('static', filename=f'processed/{filename}')
+    video_url = url_for('video_file', filename=filename)
     download_url = url_for('download_file', filename=filename)
     return render_template('result.html', video_url=video_url, download_url=download_url)
 
@@ -136,7 +157,7 @@ def process_youtube():
         
         if success:
             # Return the URL for the processed video
-            video_url = url_for('static', filename=f'output/{output_filename}')
+            video_url = url_for('video_file', filename=output_filename)
             return jsonify({
                 'success': True,
                 'video_url': video_url,

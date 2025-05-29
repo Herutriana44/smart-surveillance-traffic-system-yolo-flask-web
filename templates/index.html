@@ -70,43 +70,6 @@
             color: red;
             margin: 10px 0;
         }
-
-        .video-container {
-            position: relative;
-            width: 100%;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        .video-container video {
-            width: 100%;
-            height: auto;
-            background: #000;
-        }
-
-        /* Loading spinner */
-        .loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: translate(-50%, -50%) rotate(0deg);
-            }
-
-            100% {
-                transform: translate(-50%, -50%) rotate(360deg);
-            }
-        }
     </style>
 </head>
 
@@ -175,12 +138,7 @@
                     </div>
                     <div id="youtubeResult" class="d-none">
                         <h6>Processed Video:</h6>
-                        <div class="video-container mb-3">
-                            <video id="youtubeVideo" class="img-fluid" controls playsinline>
-                                <source src="" type="video/mp4">
-                                Your browser does not support the video tag.
-                            </video>
-                        </div>
+                        <video id="youtubeVideo" class="img-fluid mb-3" controls></video>
                         <div class="d-grid gap-2">
                             <a id="youtubeDownload" href="#" class="btn btn-success" download>
                                 <i class="fas fa-download"></i> Download Processed Video
@@ -221,22 +179,6 @@
                     video.src = data.video_url;
                     downloadBtn.href = data.video_url;
                     result.classList.remove('d-none');
-
-                    // Add loading indicator while video loads
-                    const loading = document.createElement('div');
-                    loading.className = 'loading';
-                    video.parentElement.appendChild(loading);
-
-                    // Remove loading indicator when video can play
-                    video.addEventListener('canplay', () => {
-                        loading.remove();
-                    });
-
-                    // Handle video errors
-                    video.addEventListener('error', (e) => {
-                        console.error('Video error:', e);
-                        alert('Error playing video. Please try downloading it instead.');
-                    });
                 } else {
                     alert(data.error || 'Failed to process YouTube stream');
                 }
