@@ -2,67 +2,19 @@
 <html>
 
 <head>
-    <title>Processed Video</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .video-container {
-            margin: 20px 0;
-        }
-
-        video {
-            width: 100%;
-            max-width: 800px;
-            height: auto;
-        }
-
-        .download-btn {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            margin-top: 10px;
-        }
-
-        .download-btn:hover {
-            background-color: #0056b3;
-        }
-    </style>
+    <title>Hasil Proses Video</title>
 </head>
 
 <body>
-    <h1>Processed Video</h1>
-
-    <div class="video-container">
-        <video controls preload="metadata">
-            <source src="{{ video_url }}" type="video/mp4">
-            Your browser does not support the video tag.
-        </video>
-    </div>
-
-    <a href="{{ download_url }}" class="download-btn" download>
-        Download Processed Video
-    </a>
-
-    <script>
-        // Add event listener for video loading
-        document.querySelector('video').addEventListener('loadedmetadata', function () {
-            console.log('Video metadata loaded');
-        });
-
-        // Add event listener for video errors
-        document.querySelector('video').addEventListener('error', function (e) {
-            console.error('Video error:', e);
-            alert('Error loading video. Please try downloading the file instead.');
-        });
-    </script>
+    <h1>Hasil Proses Video</h1>
+    <video width="720" controls>
+        <source src="{{ video_url }}" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <br>
+    <a href="{{ download_url }}"><button>Download Video Hasil</button></a>
+    <br><br>
+    <a href="/">Kembali ke Upload</a>
 </body>
 
 </html>
