@@ -1,0 +1,99 @@
+import os
+import re
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory
+from werkzeug.utils import secure_filename
+from process_video import process_video
+from process_youtube import process_youtube_stream
+from pyngrok import ngrok
+
+UPLOAD_FOLDER = 'uploads'
+PROCESSED_FOLDER = 'static/processed'
+ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov'}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_youtube_id(url):
+    """Extract YouTube video ID from URL"""
+    patterns = [
+        r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?]+)',
+        r'youtube\.com\/embed\/([^&\n?]+)',
+        r'youtube\.com\/v\/([^&\n?]+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+@app.route('/', methods=['GET', 'POST'])
+def upload_file():
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            return render_template('index.html', error='No file part')
+        file = request.files['file']
+        if file.filename == '':
+            return render_template('index.html', error='No selected file')
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(input_path)
+            output_filename = 'processed_' + filename
+            output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
+            # Proses video
+            process_video(input_path, output_path)
+            return redirect(url_for('result', filename=output_filename))
+    return render_template('index.html')
+
+@app.route('/youtube', methods=['GET', 'POST'])
+def youtube_stream():
+    if request.method == 'POST':
+        youtube_url = request.form.get('youtube_url', '')
+        if not youtube_url:
+            return render_template('youtube.html', error='Please enter a YouTube URL')
+        
+        youtube_id = extract_youtube_id(youtube_url)
+        if not youtube_id:
+            return render_template('youtube.html', error='Invalid YouTube URL')
+        
+        # Generate output filename based on YouTube ID
+        output_filename = f'processed_youtube_{youtube_id}.mp4'
+        output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
+        
+        # Process YouTube stream
+        success = process_youtube_stream(youtube_url, output_path)
+        if not success:
+            return render_template('youtube.html', error='Failed to process YouTube stream')
+        
+        processed_url = url_for('static', filename=f'processed/{output_filename}')
+        return render_template('youtube.html', 
+                             youtube_url=youtube_url,
+                             youtube_id=youtube_id,
+                             processed_url=processed_url)
+    
+    return render_template('youtube.html')
+
+@app.route('/result/<filename>')
+def result(filename):
+    video_url = url_for('static', filename=f'processed/{filename}')
+    download_url = url_for('download_file', filename=filename)
+    return render_template('result.html', video_url=video_url, download_url=download_url)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_from_directory(app.config['PROCESSED_FOLDER'], filename, as_attachment=True)
+
+if __name__ == '__main__':
+    # Only for Colab: start ngrok tunnel
+    public_url = ngrok.connect(5000).public_url
+    print(f' * ngrok tunnel: {public_url}')
+    app.run(port=5000) 
