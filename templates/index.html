@@ -138,7 +138,10 @@
                     </div>
                     <div id="youtubeResult" class="d-none">
                         <h6>Processed Video:</h6>
-                        <video id="youtubeVideo" class="img-fluid mb-3" controls></video>
+                        <video id="youtubeVideo" class="img-fluid mb-3" controls preload="metadata" playsinline>
+                            <source type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
                         <div class="d-grid gap-2">
                             <a id="youtubeDownload" href="#" class="btn btn-success" download>
                                 <i class="fas fa-download"></i> Download Processed Video
@@ -176,7 +179,9 @@
 
                 if (response.ok) {
                     // Show result
-                    video.src = data.video_url;
+                    const source = video.querySelector('source');
+                    source.src = data.video_url;
+                    video.load(); // Reload video element
                     downloadBtn.href = data.video_url;
                     result.classList.remove('d-none');
                 } else {
