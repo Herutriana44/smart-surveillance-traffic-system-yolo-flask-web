@@ -3,7 +3,7 @@ import re
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
 from process_video import process_video
-from process_youtube import process_youtube_stream
+from process_youtube import process_youtube
 from pyngrok import ngrok
 from datetime import datetime
 import uuid
@@ -131,7 +131,7 @@ def youtube_stream():
         output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
         
         # Process YouTube stream
-        success = process_youtube_stream(youtube_url, output_path)
+        success = process_youtube(youtube_url, output_path)
         if not success:
             return render_template('youtube.html', error='Failed to process YouTube stream')
         
@@ -154,7 +154,7 @@ def download_file(filename):
     return send_from_directory(app.config['PROCESSED_FOLDER'], filename, as_attachment=True)
 
 @app.route('/process_youtube', methods=['POST'])
-def process_youtube():
+def handle_youtube_stream():
     try:
         if 'youtube_url' not in request.form:
             print("Error: No YouTube URL provided in request")
@@ -185,7 +185,7 @@ def process_youtube():
         
         try:
             # Process the YouTube stream without saving to file
-            success = process_youtube_stream(
+            success = process_youtube(
                 youtube_url=youtube_url,
                 quality=quality,
                 browser=browser,
@@ -201,28 +201,23 @@ def process_youtube():
             else:
                 print("Failed to start YouTube stream processing")
                 return jsonify({
-                    'error': 'Failed to start YouTube stream processing'
-                }), 400
+                    'success': False,
+                    'error': 'Failed to start stream processing'
+                }), 500
                 
         except Exception as e:
-            print(f"Error during YouTube stream processing: {str(e)}")
+            print(f"Error processing stream: {str(e)}")
             return jsonify({
+                'success': False,
                 'error': f'Error processing stream: {str(e)}'
             }), 500
             
     except Exception as e:
-        print(f"Unexpected error in process_youtube route: {str(e)}")
+        print(f"Error in handle_youtube_stream: {str(e)}")
         return jsonify({
-            'error': f'Unexpected error: {str(e)}'
+            'success': False,
+            'error': str(e)
         }), 500
-    finally:
-        # Clean up cookies file if it was uploaded
-        if 'cookies_file' in locals() and cookies_file and os.path.exists(cookies_file):
-            try:
-                os.remove(cookies_file)
-                print(f"Cleaned up cookies file: {cookies_file}")
-            except Exception as e:
-                print(f"Error cleaning up cookies file: {str(e)}")
 
 @app.route('/upload', methods=['POST'])
 def upload_file_socket():
@@ -286,7 +281,7 @@ def start_stream():
     
     try:
         # Start processing in a separate thread
-        thread = threading.Thread(target=process_youtube_stream,
+        thread = threading.Thread(target=process_youtube,
                                 args=(youtube_url, None))
         thread.daemon = True
         thread.start()

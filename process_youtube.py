@@ -7,7 +7,7 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from models.common import DetectMultiBackend, AutoShape
 import os
 import base64
-from flask import Flask, request, jsonify, render_template, Response
+from flask import Flask, request, jsonify, render_template_string, Response
 from flask_socketio import SocketIO
 from flask_cors import CORS
 import threading
@@ -15,7 +15,6 @@ import queue
 import logging
 import subprocess
 import tempfile
-import ffmpeg
 
 # Initialize Flask and SocketIO
 app = Flask(__name__)
@@ -27,71 +26,36 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Global variables for streaming
-stream_queue = queue.Queue(maxsize=10)
 is_streaming = False
-current_stream = None
-current_cap = None
 current_process = None
-
-# Area ROI dan parameter lain
-area1 = [(830,280),(830,470),(90,470),(90,280)]
-area2 = [(650,30),(650,140),(91,140),(91,30)]
-CONF = 0.6
-CLASS_ID = None
-BLUR_ID = None
-
-def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness=1,
-                     rect_color=(255, 0, 255), line_color=(0, 255, 0)):
-    x, y, w, h = bbox
-    x1, y1 = x + w, y + h
-    if rect_thickness != 0:
-        cv2.rectangle(img, bbox, rect_color, rect_thickness)
-    # Top Left  x, y
-    cv2.line(img, (x, y), (x + line_length, y), line_color, line_thickness)
-    cv2.line(img, (x, y), (x, y + line_length), line_color, line_thickness)
-    # Top Right  x1, y
-    cv2.line(img, (x1, y), (x1 - line_length, y), line_color, line_thickness)
-    cv2.line(img, (x1, y), (x1, y + line_length), line_color, line_thickness)
-    # Bottom Left  x, y1
-    cv2.line(img, (x, y1), (x + line_length, y1), line_color, line_thickness)
-    cv2.line(img, (x, y1), (x, y1 - line_length), line_color, line_thickness)
-    # Bottom Right  x1, y1
-    cv2.line(img, (x1, y1), (x1 - line_length, y1), line_color, line_thickness)
-    cv2.line(img, (x1, y1), (x1, y1 - line_length), line_color, line_thickness)
-    return img
+current_cap = None
 
 def get_youtube_stream_url(youtube_url, quality='720p'):
     try:
         logger.info(f"Getting stream URL for: {youtube_url} with quality: {quality}")
-        cmd = [
-            "yt-dlp",
-            "-g",
-            "-f", f"bestvideo[height<={quality[:-1]}]+bestaudio/best[height<={quality[:-1]}]",
-            youtube_url
-        ]
+        ydl_opts = {
+            'format': f'bestvideo[height<={quality[:-1]}]+bestaudio/best[height<={quality[:-1]}]',
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+        }
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            logger.error(f"yt-dlp error: {result.stderr}")
-            raise Exception(f"Failed to get stream URL: {result.stderr}")
-            
-        stream_url = result.stdout.strip()
-        logger.info(f"Successfully got stream URL: {stream_url}")
-        return stream_url
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+            if 'url' in info:
+                stream_url = info['url']
+                logger.info(f"Successfully got stream URL: {stream_url}")
+                return stream_url
+            else:
+                logger.error("No URL found in video info")
+                return None
+                
     except Exception as e:
         logger.error(f"Error getting stream URL: {str(e)}")
         raise
 
-def encode_frame(frame):
-    """Encode frame to base64 for streaming"""
-    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    return base64.b64encode(buffer).decode('utf-8')
-
 def process_frame(frame):
     try:
-        # Log frame information
-        logger.info(f"Processing frame with shape: {frame.shape}")
-        
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # Apply Gaussian blur
@@ -100,64 +64,44 @@ def process_frame(frame):
         edges = cv2.Canny(blurred, 50, 150)
         # Convert back to BGR for display
         result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-        
-        logger.info(f"Processed frame shape: {result.shape}")
         return result
     except Exception as e:
         logger.error(f"Error processing frame: {str(e)}")
         return frame
 
-def stream_processor():
-    global is_streaming, current_cap, current_process
+def generate_frames():
+    global is_streaming, current_process
     
-    while True:
-        if not is_streaming:
-            time.sleep(0.1)
-            continue
-            
+    while is_streaming and current_process is not None:
         try:
-            if current_process is None:
-                logger.error("FFmpeg process is not available")
-                is_streaming = False
-                socketio.emit('error', {'message': 'Failed to open video stream'})
-                continue
-
             # Read frame from FFmpeg process
-            frame_data = current_process.stdout.read(1920 * 1080 * 3)  # Read raw frame data
+            frame_data = current_process.stdout.read(1280 * 720 * 3)  # Read raw frame data for 720p
             if not frame_data:
                 logger.error("Failed to read frame from FFmpeg")
-                is_streaming = False
-                socketio.emit('error', {'message': 'Failed to read video frame'})
-                continue
+                break
 
             # Convert raw frame data to numpy array
             frame = np.frombuffer(frame_data, dtype=np.uint8)
-            frame = frame.reshape((1080, 1920, 3))  # Reshape to video dimensions
+            frame = frame.reshape((720, 1280, 3))  # Reshape to 720p dimensions
             
-            logger.info(f"Frame shape: {frame.shape}, dtype: {frame.dtype}")
-
-            # Process the frame
+            # Process frame
             processed_frame = process_frame(frame)
             
             # Convert frame to JPEG
-            _, buffer = cv2.imencode('.jpg', processed_frame)
-            frame_bytes = base64.b64encode(buffer).decode('utf-8')
-            
-            # Send frame through Socket.IO
-            socketio.emit('video_frame', {
-                'frame': frame_bytes,
-                'timestamp': time.time()
-            })
-            
-            logger.info("Frame sent successfully")
-            
+            ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ret:
+                logger.error("Failed to encode frame")
+                continue
+                
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                   
         except Exception as e:
-            logger.error(f"Error in stream processor: {str(e)}")
-            is_streaming = False
-            socketio.emit('error', {'message': f'Streaming error: {str(e)}'})
+            logger.error(f"Error in generate_frames: {str(e)}")
             break
 
-def process_youtube_stream(youtube_url, output_path=None, quality='720p', browser='chrome', cookies_file=None):
+def process_youtube(youtube_url, output_path=None, quality='720p', browser='chrome', cookies_file=None):
     """
     Process YouTube stream and either save to file or stream via Socket.IO
     
@@ -171,9 +115,13 @@ def process_youtube_stream(youtube_url, output_path=None, quality='720p', browse
     Returns:
         bool: True if processing started successfully, False otherwise
     """
-    global is_streaming, current_cap, current_stream, current_process
+    global is_streaming, current_process
     
     try:
+        if not youtube_url:
+            logger.error("No YouTube URL provided")
+            return False
+            
         logger.info(f"Starting YouTube stream processing for URL: {youtube_url}")
         
         # Get stream URL
@@ -185,6 +133,7 @@ def process_youtube_stream(youtube_url, output_path=None, quality='720p', browse
         logger.info(f"Successfully got stream URL: {stream_url}")
         
         # Stop any existing stream
+        is_streaming = False
         if current_process is not None:
             current_process.terminate()
             current_process = None
@@ -213,21 +162,48 @@ def process_youtube_stream(youtube_url, output_path=None, quality='720p', browse
             error = current_process.stderr.read().decode()
             logger.error(f"FFmpeg process failed to start: {error}")
             return False
-            
-        current_stream = stream_url
+
         is_streaming = True
         
-        # Start processing thread if not already running
-        if not any(t.name == 'StreamProcessor' for t in threading.enumerate()):
-            processor = threading.Thread(target=stream_processor, name='StreamProcessor')
-            processor.daemon = True
-            processor.start()
+        # If output_path is provided, save the processed video
+        if output_path:
+            # Get video properties
+            fps = 30  # Default FPS
+            width = 1280
+            height = 720
+            
+            # Create video writer
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            
+            while is_streaming:
+                try:
+                    # Read frame from FFmpeg process
+                    frame_data = current_process.stdout.read(width * height * 3)
+                    if not frame_data:
+                        break
+
+                    # Convert raw frame data to numpy array
+                    frame = np.frombuffer(frame_data, dtype=np.uint8)
+                    frame = frame.reshape((height, width, 3))
+                    
+                    # Process frame
+                    processed_frame = process_frame(frame)
+                    
+                    # Write processed frame
+                    out.write(processed_frame)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing frame for output: {str(e)}")
+                    break
+                    
+            out.release()
             
         logger.info("Stream processing started successfully")
         return True
         
     except Exception as e:
-        logger.error(f"Error in process_youtube_stream: {str(e)}")
+        logger.error(f"Error in process_youtube: {str(e)}")
         is_streaming = False
         if current_process is not None:
             current_process.terminate()
@@ -236,91 +212,177 @@ def process_youtube_stream(youtube_url, output_path=None, quality='720p', browse
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template_string("""
+    <html>
+    <head>
+        <title>YouTube Live Stream Processing</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+                background-color: #f0f0f0;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #333;
+                text-align: center;
+            }
+            .video-container {
+                text-align: center;
+                margin: 20px 0;
+            }
+            .controls {
+                margin: 20px 0;
+                text-align: center;
+            }
+            input[type="text"] {
+                width: 70%;
+                padding: 8px;
+                margin-right: 10px;
+            }
+            button {
+                padding: 8px 16px;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+            button:hover {
+                background-color: #45a049;
+            }
+            button:disabled {
+                background-color: #cccccc;
+                cursor: not-allowed;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>YouTube Live Stream Processing</h1>
+            <div class="controls">
+                <input type="text" id="youtube_url" placeholder="Enter YouTube URL">
+                <button onclick="startStream()">Start Stream</button>
+                <button onclick="stopStream()">Stop Stream</button>
+            </div>
+            <div class="video-container">
+                <img src="/video_feed" width="640" />
+            </div>
+        </div>
+        
+        <script>
+            function startStream() {
+                const url = document.getElementById('youtube_url').value;
+                if (!url) {
+                    alert('Please enter a YouTube URL');
+                    return;
+                }
+                
+                fetch('/process_youtube', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `youtube_url=${encodeURIComponent(url)}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('Stream started successfully');
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error starting stream');
+                });
+            }
+            
+            function stopStream() {
+                fetch('/stop_stream', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Stream stopped successfully');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error stopping stream');
+                });
+            }
+        </script>
+    </body>
+    </html>
+    """)
 
-@app.route('/youtube')
-def youtube():
-    return render_template('index.html')
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+                   mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/process_youtube', methods=['POST'])
-def process_youtube():
-    global is_streaming, current_cap, current_stream
+def handle_youtube_stream():
+    global is_streaming, current_process
     
     try:
-        youtube_url = request.form.get('youtube_url')
+        if 'youtube_url' not in request.form:
+            return jsonify({'error': 'No YouTube URL provided'}), 400
+        
+        youtube_url = request.form['youtube_url']
         quality = request.form.get('quality', '720p')
         
         if not youtube_url:
-            return jsonify({'error': 'No YouTube URL provided'}), 400
-            
+            return jsonify({'error': 'Empty YouTube URL'}), 400
+        
         logger.info(f"Processing YouTube URL: {youtube_url}")
         
-        # Get stream URL
-        stream_url = get_youtube_stream_url(youtube_url, quality)
-        logger.info(f"Got stream URL: {stream_url}")
-        
-        # Stop any existing stream
-        if current_cap is not None:
-            current_cap.release()
-        
-        # Initialize new video capture
-        current_cap = cv2.VideoCapture(stream_url)
-        if not current_cap.isOpened():
-            raise Exception("Failed to open video stream")
+        # Process the stream
+        success = process_youtube(youtube_url, quality=quality)
+        if not success:
+            return jsonify({'error': 'Failed to start stream processing'}), 500
             
-        current_stream = stream_url
-        is_streaming = True
-        
-        # Start processing thread if not already running
-        if not any(t.name == 'StreamProcessor' for t in threading.enumerate()):
-            processor = threading.Thread(target=stream_processor, name='StreamProcessor')
-            processor.daemon = True
-            processor.start()
-        
         return jsonify({
-            'message': 'Stream started successfully',
-            'stream_url': stream_url
+            'success': True,
+            'message': 'Stream started successfully'
         })
         
     except Exception as e:
-        logger.error(f"Error processing YouTube stream: {str(e)}")
-        is_streaming = False
-        if current_cap is not None:
-            current_cap.release()
-            current_cap = None
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error in handle_youtube_stream: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-@socketio.on('stop_stream')
+@app.route('/stop_stream', methods=['POST'])
 def stop_stream():
     global is_streaming, current_process
-    logger.info("Stopping stream...")
-    is_streaming = False
-    if current_process is not None:
-        current_process.terminate()
-        current_process = None
-    socketio.emit('processing_complete', {'message': 'Stream stopped'})
-
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected')
-
-@socketio.on('start_stream')
-def handle_start_stream(data):
-    youtube_url = data.get('url')
-    if youtube_url:
-        process_youtube_stream(youtube_url)
-        return {'status': 'success', 'message': 'Streaming started'}
-    return {'status': 'error', 'message': 'No YouTube URL provided'}
-
-@socketio.on('stop_stream')
-def handle_stop_stream():
-    global is_streaming
-    is_streaming = False
-    return {'status': 'success', 'message': 'Streaming stopped'}
+    
+    try:
+        is_streaming = False
+        if current_process is not None:
+            current_process.terminate()
+            current_process = None
+            
+        return jsonify({
+            'success': True,
+            'message': 'Stream stopped successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in stop_stream: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=True) 

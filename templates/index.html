@@ -85,10 +85,9 @@
             margin: 20px auto;
             position: relative;
             display: none;
-            /* Hide by default */
         }
 
-        #videoCanvas {
+        #videoStream {
             width: 100%;
             background: #000;
             border-radius: 8px;
@@ -249,7 +248,7 @@
                 <button class="close-stream" id="closeStream">&times;</button>
             </div>
             <div class="video-container">
-                <canvas id="videoCanvas"></canvas>
+                <img id="videoStream" src="" alt="Video Stream">
                 <div class="progress mt-2">
                     <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
                 </div>
@@ -258,197 +257,179 @@
     </div>
 
     <script>
-        const socket = io();
-        const canvas = document.getElementById('videoCanvas');
-        const ctx = canvas.getContext('2d');
-        const progressBar = document.getElementById('progressBar');
-        const startStreamBtn = document.getElementById('startStream');
-        const stopStreamBtn = document.getElementById('stopStream');
-        const streamStatus = document.getElementById('streamStatus');
-        const streamView = document.getElementById('streamView');
-        const closeStreamBtn = document.getElementById('closeStream');
-        let isStreaming = false;
+        document.addEventListener('DOMContentLoaded', function () {
+            const socket = io();
+            const videoStream = document.getElementById('videoStream');
+            const progressBar = document.getElementById('progressBar');
+            const startStreamBtn = document.getElementById('startStream');
+            const stopStreamBtn = document.getElementById('stopStream');
+            const streamStatus = document.getElementById('streamStatus');
+            const streamView = document.getElementById('streamView');
+            const closeStreamBtn = document.getElementById('closeStream');
+            let isStreaming = false;
 
-        // Set canvas size
-        canvas.width = 1200;
-        canvas.height = 675;
+            // Handle file upload
+            const uploadForm = document.getElementById('uploadForm');
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData();
+                    const fileInput = document.getElementById('videoFile');
+                    formData.append('file', fileInput.files[0]);
 
-        // Handle file upload
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            const fileInput = document.getElementById('videoFile');
-            formData.append('file', fileInput.files[0]);
-
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
+                    try {
+                        const response = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+                        if (data.error) {
+                            alert(data.error);
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        alert('Error uploading file');
+                    }
                 });
-                const data = await response.json();
-                if (data.error) {
-                    alert(data.error);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Error uploading file');
-            }
-        });
-
-        // Handle YouTube URL
-        document.getElementById('youtubeForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (isStreaming) return;
-
-            const youtubeUrl = document.getElementById('youtubeUrl').value;
-            if (!youtubeUrl) {
-                alert('Please enter a YouTube URL');
-                return;
             }
 
-            const formData = new FormData();
-            formData.append('youtube_url', youtubeUrl);
-            formData.append('quality', document.getElementById('quality').value);
+            // Handle YouTube URL
+            const youtubeForm = document.getElementById('youtubeForm');
+            if (youtubeForm) {
+                youtubeForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    if (isStreaming) return;
 
-            const cookiesFile = document.getElementById('cookiesFile').files[0];
-            if (cookiesFile) {
-                formData.append('cookies_file', cookiesFile);
-            }
+                    const youtubeUrl = document.getElementById('youtubeUrl').value;
+                    if (!youtubeUrl) {
+                        alert('Please enter a YouTube URL');
+                        return;
+                    }
 
-            try {
-                startStreaming();
-                console.log('Sending request to process YouTube stream...');
+                    const formData = new FormData();
+                    formData.append('youtube_url', youtubeUrl);
+                    formData.append('quality', document.getElementById('quality').value);
 
-                const response = await fetch('/process_youtube', {
-                    method: 'POST',
-                    body: formData
+                    const cookiesFile = document.getElementById('cookiesFile').files[0];
+                    if (cookiesFile) {
+                        formData.append('cookies_file', cookiesFile);
+                    }
+
+                    try {
+                        startStreaming();
+                        console.log('Sending request to process YouTube stream...');
+
+                        const response = await fetch('/process_youtube', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        console.log('Received response:', response.status);
+                        const data = await response.json();
+                        console.log('Response data:', data);
+
+                        if (!response.ok) {
+                            throw new Error(data.error || 'Failed to process YouTube stream');
+                        }
+
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+
+                        // Show streaming view and start video feed
+                        streamView.classList.add('active');
+                        document.querySelector('.video-container').style.display = 'block';
+                        videoStream.src = `/video_feed?url=${encodeURIComponent(youtubeUrl)}`;
+
+                        // If we get here, the stream started successfully
+                        streamStatus.textContent = data.message || 'Stream started successfully';
+                        streamStatus.className = 'status-indicator status-streaming active';
+
+                    } catch (error) {
+                        console.error('Error:', error);
+                        stopStreaming();
+                        const errorMessage = error.message || 'Error processing YouTube video';
+                        streamStatus.textContent = errorMessage;
+                        streamStatus.className = 'status-indicator status-stopped active';
+                        alert(errorMessage);
+                    }
                 });
+            }
 
-                console.log('Received response:', response.status);
-                const data = await response.json();
-                console.log('Response data:', data);
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to process YouTube stream');
-                }
-
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                // Show streaming view
-                streamView.classList.add('active');
-                document.querySelector('.video-container').style.display = 'block';
-
-                // If we get here, the stream started successfully
-                streamStatus.textContent = data.message || 'Stream started successfully';
+            function startStreaming() {
+                isStreaming = true;
+                startStreamBtn.disabled = true;
+                stopStreamBtn.disabled = false;
+                streamStatus.textContent = 'Connecting to stream...';
                 streamStatus.className = 'status-indicator status-streaming active';
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+            }
 
-            } catch (error) {
-                console.error('Error:', error);
-                stopStreaming();
-                const errorMessage = error.message || 'Error processing YouTube video';
-                streamStatus.textContent = errorMessage;
+            function stopStreaming() {
+                isStreaming = false;
+                startStreamBtn.disabled = false;
+                stopStreamBtn.disabled = true;
+                streamStatus.textContent = 'Stream stopped';
                 streamStatus.className = 'status-indicator status-stopped active';
-                alert(errorMessage);
+                socket.emit('stop_stream');
+                streamView.classList.remove('active');
+                document.querySelector('.video-container').style.display = 'none';
+                videoStream.src = '';
             }
-        });
 
-        function startStreaming() {
-            isStreaming = true;
-            startStreamBtn.disabled = true;
-            stopStreamBtn.disabled = false;
-            streamStatus.textContent = 'Connecting to stream...';
-            streamStatus.className = 'status-indicator status-streaming active';
-            progressBar.style.width = '0%';
-            progressBar.textContent = '0%';
-        }
-
-        function stopStreaming() {
-            isStreaming = false;
-            startStreamBtn.disabled = false;
-            stopStreamBtn.disabled = true;
-            streamStatus.textContent = 'Stream stopped';
-            streamStatus.className = 'status-indicator status-stopped active';
-            socket.emit('stop_stream');
-            streamView.classList.remove('active');
-            document.querySelector('.video-container').style.display = 'none';
-        }
-
-        stopStreamBtn.addEventListener('click', stopStreaming);
-        closeStreamBtn.addEventListener('click', stopStreaming);
-
-        // Handle video frames from Socket.IO
-        socket.on('video_frame', (data) => {
-            if (!isStreaming) return;
-
-            const img = new Image();
-            img.onload = () => {
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            };
-            img.src = 'data:image/jpeg;base64,' + data.frame;
-
-            // Update progress bar if available
-            if (data.progress) {
-                progressBar.style.width = `${data.progress}%`;
-                progressBar.textContent = `${Math.round(data.progress)}%`;
+            if (stopStreamBtn) {
+                stopStreamBtn.addEventListener('click', stopStreaming);
             }
-        });
-
-        // Handle processing completion
-        socket.on('processing_complete', (data) => {
-            stopStreaming();
-            if (data.message) {
-                streamStatus.textContent = data.message;
+            if (closeStreamBtn) {
+                closeStreamBtn.addEventListener('click', stopStreaming);
             }
-            progressBar.style.width = '100%';
-            progressBar.textContent = '100%';
-        });
 
-        // Handle connection status
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            streamStatus.textContent = 'Connected to server';
-            streamStatus.className = 'status-indicator status-streaming active';
-        });
+            // Handle connection status
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                streamStatus.textContent = 'Connected to server';
+                streamStatus.className = 'status-indicator status-streaming active';
+            });
 
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            stopStreaming();
-            streamStatus.textContent = 'Disconnected from server';
-            streamStatus.className = 'status-indicator status-stopped active';
-        });
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+                stopStreaming();
+                streamStatus.textContent = 'Disconnected from server';
+                streamStatus.className = 'status-indicator status-stopped active';
+            });
 
-        // Handle errors
-        socket.on('error', (data) => {
-            console.error('Streaming error:', data.message);
-            stopStreaming();
-            streamStatus.textContent = data.message || 'An error occurred during streaming';
-            streamStatus.className = 'status-indicator status-stopped active';
-            alert(data.message || 'An error occurred during streaming');
-        });
+            // Handle errors
+            socket.on('error', (data) => {
+                console.error('Streaming error:', data.message);
+                stopStreaming();
+                streamStatus.textContent = data.message || 'An error occurred during streaming';
+                streamStatus.className = 'status-indicator status-stopped active';
+                alert(data.message || 'An error occurred during streaming');
+            });
 
-        // Handle reconnection
-        socket.on('reconnect', () => {
-            console.log('Reconnected to server');
-            streamStatus.textContent = 'Reconnected to server';
-            streamStatus.className = 'status-indicator status-streaming active';
-        });
+            // Handle reconnection
+            socket.on('reconnect', () => {
+                console.log('Reconnected to server');
+                streamStatus.textContent = 'Reconnected to server';
+                streamStatus.className = 'status-indicator status-streaming active';
+            });
 
-        // Handle reconnection attempts
-        socket.on('reconnect_attempt', () => {
-            console.log('Attempting to reconnect...');
-            streamStatus.textContent = 'Attempting to reconnect...';
-            streamStatus.className = 'status-indicator status-streaming active';
-        });
+            // Handle reconnection attempts
+            socket.on('reconnect_attempt', () => {
+                console.log('Attempting to reconnect...');
+                streamStatus.textContent = 'Attempting to reconnect...';
+                streamStatus.className = 'status-indicator status-streaming active';
+            });
 
-        // Handle reconnection failure
-        socket.on('reconnect_failed', () => {
-            console.log('Failed to reconnect');
-            stopStreaming();
-            streamStatus.textContent = 'Failed to reconnect to server';
-            streamStatus.className = 'status-indicator status-stopped active';
-            alert('Failed to reconnect to server. Please refresh the page.');
+            // Handle reconnection failure
+            socket.on('reconnect_failed', () => {
+                console.log('Failed to reconnect');
+                stopStreaming();
+                streamStatus.textContent = 'Failed to reconnect to server';
+                streamStatus.className = 'status-indicator status-stopped active';
+                alert('Failed to reconnect to server. Please refresh the page.');
+            });
         });
     </script>
 </body>
