@@ -1,12 +1,20 @@
 import os
 import re
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, send_file
 from werkzeug.utils import secure_filename
 from process_video import process_video
 from process_youtube import process_youtube_stream
 from pyngrok import ngrok
 from datetime import datetime
 import uuid
+from flask_socketio import SocketIO
+from flask_cors import CORS
+import cv2
+import numpy as np
+import time
+import base64
+import threading
+import queue
 
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'static/processed'
@@ -16,9 +24,13 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
+# Queue for video processing
+video_queue = queue.Queue()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -36,6 +48,50 @@ def extract_youtube_id(url):
         if match:
             return match.group(1)
     return None
+
+def process_video_stream(video_path, processed_path):
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Create video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(processed_path, fourcc, fps, 
+                         (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                          int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))))
+    
+    frame_number = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        # Process frame
+        processed_frame = process_video(frame)
+        
+        # Write processed frame
+        out.write(processed_frame)
+        
+        # Convert frame to base64 for streaming
+        _, buffer = cv2.imencode('.jpg', processed_frame)
+        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        # Emit frame to connected clients
+        socketio.emit('video_frame', {
+            'frame': frame_base64,
+            'progress': (frame_number / frame_count) * 100
+        })
+        
+        frame_number += 1
+        time.sleep(1/fps)  # Maintain original video speed
+    
+    cap.release()
+    out.release()
+    
+    # Emit completion event
+    socketio.emit('processing_complete', {
+        'video_url': f'/processed/{os.path.basename(processed_path)}'
+    })
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
@@ -164,8 +220,38 @@ def process_youtube():
             except:
                 pass
 
+@app.route('/upload', methods=['POST'])
+def upload_file_socket():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        processed_filename = f'processed_{filename}'
+        processed_path = os.path.join(app.config['PROCESSED_FOLDER'], processed_filename)
+        
+        file.save(video_path)
+        
+        # Start processing in a separate thread
+        thread = threading.Thread(target=process_video_stream, 
+                                args=(video_path, processed_path))
+        thread.start()
+        
+        return jsonify({'message': 'Processing started'})
+    
+    return jsonify({'error': 'Invalid file type'}), 400
+
+@app.route('/processed/<filename>')
+def processed_video(filename):
+    return send_file(os.path.join(app.config['PROCESSED_FOLDER'], filename))
+
 if __name__ == '__main__':
     # Only for Colab: start ngrok tunnel
     public_url = ngrok.connect(5000).public_url
     print(f' * ngrok tunnel: {public_url}')
-    app.run(port=5000) 
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000) 
