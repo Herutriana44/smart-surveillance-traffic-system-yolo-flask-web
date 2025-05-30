@@ -10,7 +10,7 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -70,23 +70,119 @@
             background-color: #0056b3;
         }
 
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
         .error {
             color: red;
             margin: 10px 0;
         }
 
         .video-container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 20px auto;
+            position: relative;
+            display: none;
+            /* Hide by default */
         }
 
         #videoCanvas {
             width: 100%;
             background: #000;
+            border-radius: 8px;
         }
 
         .progress {
             height: 25px;
+            margin-top: 10px;
+        }
+
+        .stream-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .status-indicator {
+            padding: 8px 16px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .status-indicator.active {
+            display: block;
+        }
+
+        .status-streaming {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .status-stopped {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .card {
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .form-control:focus,
+        .form-select:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, .25);
+        }
+
+        .stream-view {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+        }
+
+        .stream-view.active {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stream-content {
+            width: 90%;
+            max-width: 1200px;
+            margin: 20px auto;
+        }
+
+        .stream-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            color: white;
+        }
+
+        .close-stream {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 10px;
+        }
+
+        .close-stream:hover {
+            color: #dc3545;
         }
     </style>
 </head>
@@ -135,15 +231,28 @@
                         <input type="file" class="form-control" id="cookiesFile" name="cookies_file">
                         <small class="text-muted">Optional: Upload cookies file for age-restricted videos</small>
                     </div>
-                    <button type="submit" class="btn btn-primary">Process YouTube Video</button>
+                    <div class="stream-controls">
+                        <button type="submit" class="btn btn-primary" id="startStream">Start Streaming</button>
+                        <button type="button" class="btn btn-danger" id="stopStream" disabled>Stop Streaming</button>
+                    </div>
+                    <div id="streamStatus" class="status-indicator"></div>
                 </form>
             </div>
         </div>
+    </div>
 
-        <div class="video-container">
-            <canvas id="videoCanvas"></canvas>
-            <div class="progress mt-2">
-                <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+    <!-- Streaming View -->
+    <div class="stream-view" id="streamView">
+        <div class="stream-content">
+            <div class="stream-header">
+                <h3>Live Stream</h3>
+                <button class="close-stream" id="closeStream">&times;</button>
+            </div>
+            <div class="video-container">
+                <canvas id="videoCanvas"></canvas>
+                <div class="progress mt-2">
+                    <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -153,10 +262,16 @@
         const canvas = document.getElementById('videoCanvas');
         const ctx = canvas.getContext('2d');
         const progressBar = document.getElementById('progressBar');
+        const startStreamBtn = document.getElementById('startStream');
+        const stopStreamBtn = document.getElementById('stopStream');
+        const streamStatus = document.getElementById('streamStatus');
+        const streamView = document.getElementById('streamView');
+        const closeStreamBtn = document.getElementById('closeStream');
+        let isStreaming = false;
 
         // Set canvas size
-        canvas.width = 800;
-        canvas.height = 450;
+        canvas.width = 1200;
+        canvas.height = 675;
 
         // Handle file upload
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
@@ -183,8 +298,16 @@
         // Handle YouTube URL
         document.getElementById('youtubeForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (isStreaming) return;
+
+            const youtubeUrl = document.getElementById('youtubeUrl').value;
+            if (!youtubeUrl) {
+                alert('Please enter a YouTube URL');
+                return;
+            }
+
             const formData = new FormData();
-            formData.append('youtube_url', document.getElementById('youtubeUrl').value);
+            formData.append('youtube_url', youtubeUrl);
             formData.append('quality', document.getElementById('quality').value);
 
             const cookiesFile = document.getElementById('cookiesFile').files[0];
@@ -193,38 +316,139 @@
             }
 
             try {
+                startStreaming();
+                console.log('Sending request to process YouTube stream...');
+
                 const response = await fetch('/process_youtube', {
                     method: 'POST',
                     body: formData
                 });
+
+                console.log('Received response:', response.status);
                 const data = await response.json();
-                if (data.error) {
-                    alert(data.error);
+                console.log('Response data:', data);
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to process YouTube stream');
                 }
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Show streaming view
+                streamView.classList.add('active');
+                document.querySelector('.video-container').style.display = 'block';
+
+                // If we get here, the stream started successfully
+                streamStatus.textContent = data.message || 'Stream started successfully';
+                streamStatus.className = 'status-indicator status-streaming active';
+
             } catch (error) {
                 console.error('Error:', error);
-                alert('Error processing YouTube video');
+                stopStreaming();
+                const errorMessage = error.message || 'Error processing YouTube video';
+                streamStatus.textContent = errorMessage;
+                streamStatus.className = 'status-indicator status-stopped active';
+                alert(errorMessage);
             }
         });
 
+        function startStreaming() {
+            isStreaming = true;
+            startStreamBtn.disabled = true;
+            stopStreamBtn.disabled = false;
+            streamStatus.textContent = 'Connecting to stream...';
+            streamStatus.className = 'status-indicator status-streaming active';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+        }
+
+        function stopStreaming() {
+            isStreaming = false;
+            startStreamBtn.disabled = false;
+            stopStreamBtn.disabled = true;
+            streamStatus.textContent = 'Stream stopped';
+            streamStatus.className = 'status-indicator status-stopped active';
+            socket.emit('stop_stream');
+            streamView.classList.remove('active');
+            document.querySelector('.video-container').style.display = 'none';
+        }
+
+        stopStreamBtn.addEventListener('click', stopStreaming);
+        closeStreamBtn.addEventListener('click', stopStreaming);
+
         // Handle video frames from Socket.IO
         socket.on('video_frame', (data) => {
+            if (!isStreaming) return;
+
             const img = new Image();
             img.onload = () => {
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             };
             img.src = 'data:image/jpeg;base64,' + data.frame;
 
-            // Update progress bar
-            progressBar.style.width = `${data.progress}%`;
-            progressBar.textContent = `${Math.round(data.progress)}%`;
+            // Update progress bar if available
+            if (data.progress) {
+                progressBar.style.width = `${data.progress}%`;
+                progressBar.textContent = `${Math.round(data.progress)}%`;
+            }
         });
 
         // Handle processing completion
         socket.on('processing_complete', (data) => {
-            alert('Video processing completed!');
+            stopStreaming();
+            if (data.message) {
+                streamStatus.textContent = data.message;
+            }
             progressBar.style.width = '100%';
             progressBar.textContent = '100%';
+        });
+
+        // Handle connection status
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            streamStatus.textContent = 'Connected to server';
+            streamStatus.className = 'status-indicator status-streaming active';
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            stopStreaming();
+            streamStatus.textContent = 'Disconnected from server';
+            streamStatus.className = 'status-indicator status-stopped active';
+        });
+
+        // Handle errors
+        socket.on('error', (data) => {
+            console.error('Streaming error:', data.message);
+            stopStreaming();
+            streamStatus.textContent = data.message || 'An error occurred during streaming';
+            streamStatus.className = 'status-indicator status-stopped active';
+            alert(data.message || 'An error occurred during streaming');
+        });
+
+        // Handle reconnection
+        socket.on('reconnect', () => {
+            console.log('Reconnected to server');
+            streamStatus.textContent = 'Reconnected to server';
+            streamStatus.className = 'status-indicator status-streaming active';
+        });
+
+        // Handle reconnection attempts
+        socket.on('reconnect_attempt', () => {
+            console.log('Attempting to reconnect...');
+            streamStatus.textContent = 'Attempting to reconnect...';
+            streamStatus.className = 'status-indicator status-streaming active';
+        });
+
+        // Handle reconnection failure
+        socket.on('reconnect_failed', () => {
+            console.log('Failed to reconnect');
+            stopStreaming();
+            streamStatus.textContent = 'Failed to reconnect to server';
+            streamStatus.className = 'status-indicator status-stopped active';
+            alert('Failed to reconnect to server. Please refresh the page.');
         });
     </script>
 </body>

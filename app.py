@@ -15,8 +15,6 @@ import time
 import base64
 import threading
 import queue
-import requests
-import logging
 
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'static/processed'
@@ -30,34 +28,6 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
-
-# Konfigurasi logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Konfigurasi NGROK URLs
-TRAFFIC_DETECTION_URL = "1TfbVOS48SeXdQ7rJ2do5JjJFxG_4d5K3jMerctfbUsXvidrT"
-VEHICLE_COUNTING_URL = "2xo4OVp1ka6HbnzvVq8dYvNQFZ6_6x7rCJyg45G4KaB3nt2Hd"
-
-# Konfigurasi kamera
-CAMERA_URL = "http://192.168.1.108:4747/video"
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
-FPS = 30
-
-# Konfigurasi antrian frame
-frame_queue = queue.Queue(maxsize=30)
-result_queue = queue.Queue(maxsize=30)
-
-# Konfigurasi deteksi
-DETECTION_INTERVAL = 1.0  # Interval deteksi dalam detik
-last_detection_time = 0
-last_count_time = 0
-
-# Variabel global untuk menyimpan hasil
-current_traffic_status = "Normal"
-current_vehicle_count = 0
-current_vehicle_types = {}
 
 # Queue for video processing
 video_queue = queue.Queue()
@@ -96,7 +66,7 @@ def process_video_stream(video_path, processed_path):
         if not ret:
             break
             
-        # Process frame
+        # Process frame using the new process_video function
         processed_frame = process_video(frame)
         
         # Write processed frame
@@ -185,70 +155,74 @@ def download_file(filename):
 
 @app.route('/process_youtube', methods=['POST'])
 def process_youtube():
-    if 'youtube_url' not in request.form:
-        return jsonify({'error': 'No YouTube URL provided'}), 400
-    
-    youtube_url = request.form['youtube_url']
-    quality = request.form.get('quality', '720p')
-    browser = request.form.get('browser', 'chrome')  # Default to Chrome
-    
-    if not youtube_url:
-        return jsonify({'error': 'Empty YouTube URL'}), 400
-    
-    # Handle cookies file upload
-    cookies_file = None
-    if 'cookies_file' in request.files:
-        cookies = request.files['cookies_file']
-        if cookies.filename:
-            # Save cookies file temporarily
-            cookies_path = os.path.join(app.config['UPLOAD_FOLDER'], 'cookies.txt')
-            cookies.save(cookies_path)
-            cookies_file = cookies_path
-    
-    # Create output directory if it doesn't exist
-    output_dir = os.path.join(app.static_folder, 'output')
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate unique output filename
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    unique_id = str(uuid.uuid4())[:8]
-    output_filename = f'youtube_output_{timestamp}_{unique_id}.mp4'
-    output_path = os.path.join(output_dir, output_filename)
-    
     try:
-        # Process the YouTube stream
-        success = process_youtube_stream(
-            youtube_url=youtube_url,
-            output_path=output_path,
-            quality=quality,
-            browser=browser,
-            cookies_file=cookies_file
-        )
+        if 'youtube_url' not in request.form:
+            print("Error: No YouTube URL provided in request")
+            return jsonify({'error': 'No YouTube URL provided'}), 400
         
-        if success:
-            # Return the URL for the processed video
-            video_url = url_for('static', filename=f'output/{output_filename}')
+        youtube_url = request.form['youtube_url']
+        quality = request.form.get('quality', '720p')
+        browser = request.form.get('browser', 'chrome')  # Default to Chrome
+        
+        if not youtube_url:
+            print("Error: Empty YouTube URL")
+            return jsonify({'error': 'Empty YouTube URL'}), 400
+        
+        print(f"Processing YouTube URL: {youtube_url}")
+        print(f"Quality: {quality}")
+        print(f"Browser: {browser}")
+        
+        # Handle cookies file upload
+        cookies_file = None
+        if 'cookies_file' in request.files:
+            cookies = request.files['cookies_file']
+            if cookies.filename:
+                # Save cookies file temporarily
+                cookies_path = os.path.join(app.config['UPLOAD_FOLDER'], 'cookies.txt')
+                cookies.save(cookies_path)
+                cookies_file = cookies_path
+                print(f"Using cookies file: {cookies_path}")
+        
+        try:
+            # Process the YouTube stream without saving to file
+            success = process_youtube_stream(
+                youtube_url=youtube_url,
+                quality=quality,
+                browser=browser,
+                cookies_file=cookies_file
+            )
+            
+            if success:
+                print("YouTube stream processing started successfully")
+                return jsonify({
+                    'success': True,
+                    'message': 'Stream processing started successfully'
+                })
+            else:
+                print("Failed to start YouTube stream processing")
+                return jsonify({
+                    'error': 'Failed to start YouTube stream processing'
+                }), 400
+                
+        except Exception as e:
+            print(f"Error during YouTube stream processing: {str(e)}")
             return jsonify({
-                'success': True,
-                'video_url': video_url,
-                'message': 'Video processed successfully'
-            })
-        else:
-            return jsonify({
-                'error': 'Failed to process YouTube stream. Please check the URL and try again.'
-            }), 400
+                'error': f'Error processing stream: {str(e)}'
+            }), 500
             
     except Exception as e:
+        print(f"Unexpected error in process_youtube route: {str(e)}")
         return jsonify({
-            'error': f'Error processing video: {str(e)}'
+            'error': f'Unexpected error: {str(e)}'
         }), 500
     finally:
         # Clean up cookies file if it was uploaded
-        if cookies_file and os.path.exists(cookies_file):
+        if 'cookies_file' in locals() and cookies_file and os.path.exists(cookies_file):
             try:
                 os.remove(cookies_file)
-            except:
-                pass
+                print(f"Cleaned up cookies file: {cookies_file}")
+            except Exception as e:
+                print(f"Error cleaning up cookies file: {str(e)}")
 
 @app.route('/upload', methods=['POST'])
 def upload_file_socket():
@@ -280,159 +254,68 @@ def upload_file_socket():
 def processed_video(filename):
     return send_file(os.path.join(app.config['PROCESSED_FOLDER'], filename))
 
-def capture_frames():
-    """Fungsi untuk menangkap frame dari kamera"""
-    cap = cv2.VideoCapture(CAMERA_URL)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    cap.set(cv2.CAP_PROP_FPS, FPS)
-    
-    if not cap.isOpened():
-        logger.error("Error: Tidak dapat membuka kamera")
-        return
-    
-    logger.info("Kamera berhasil dibuka")
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            logger.error("Error: Gagal membaca frame dari kamera")
-            time.sleep(1)
-            continue
-        
-        # Resize frame
-        frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        
-        # Simpan frame ke antrian
-        if not frame_queue.full():
-            frame_queue.put(frame)
-        
-        time.sleep(1/FPS)
-    
-    cap.release()
-
-def process_frames():
-    """Fungsi untuk memproses frame dan mendeteksi traffic"""
-    global last_detection_time, last_count_time, current_traffic_status, current_vehicle_count, current_vehicle_types
-    
-    while True:
-        if frame_queue.empty():
-            time.sleep(0.1)
-            continue
-        
-        frame = frame_queue.get()
-        current_time = time.time()
-        
-        # Deteksi traffic setiap DETECTION_INTERVAL detik
-        if current_time - last_detection_time >= DETECTION_INTERVAL:
-            try:
-                # Konversi frame ke format yang sesuai
-                _, img_encoded = cv2.imencode('.jpg', frame)
-                img_bytes = img_encoded.tobytes()
-                
-                # Kirim request ke API traffic detection
-                traffic_response = requests.post(
-                    TRAFFIC_DETECTION_URL,
-                    files={'image': ('image.jpg', img_bytes, 'image/jpeg')},
-                    timeout=5
-                )
-                
-                if traffic_response.status_code == 200:
-                    traffic_data = traffic_response.json()
-                    current_traffic_status = traffic_data.get('status', 'Normal')
-                    logger.info(f"Traffic status: {current_traffic_status}")
-                else:
-                    logger.error(f"Error traffic detection: {traffic_response.status_code}")
-                
-                # Kirim request ke API vehicle counting
-                vehicle_response = requests.post(
-                    VEHICLE_COUNTING_URL,
-                    files={'image': ('image.jpg', img_bytes, 'image/jpeg')},
-                    timeout=5
-                )
-                
-                if vehicle_response.status_code == 200:
-                    vehicle_data = vehicle_response.json()
-                    current_vehicle_count = vehicle_data.get('total_vehicles', 0)
-                    current_vehicle_types = vehicle_data.get('vehicle_types', {})
-                    logger.info(f"Vehicle count: {current_vehicle_count}")
-                else:
-                    logger.error(f"Error vehicle counting: {vehicle_response.status_code}")
-                
-                last_detection_time = current_time
-                last_count_time = current_time
-                
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error API request: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error processing frame: {str(e)}")
-        
-        # Simpan hasil ke antrian
-        if not result_queue.full():
-            result_queue.put({
-                'frame': frame,
-                'traffic_status': current_traffic_status,
-                'vehicle_count': current_vehicle_count,
-                'vehicle_types': current_vehicle_types
-            })
-
-def generate_frames():
-    """Fungsi untuk menghasilkan frame untuk streaming"""
-    while True:
-        if result_queue.empty():
-            time.sleep(0.1)
-            continue
-        
-        result = result_queue.get()
-        frame = result['frame']
-        
-        # Tambahkan informasi ke frame
-        cv2.putText(frame, f"Traffic: {result['traffic_status']}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.putText(frame, f"Vehicles: {result['vehicle_count']}", (10, 70),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        
-        # Tambahkan informasi jenis kendaraan
-        y_offset = 110
-        for vehicle_type, count in result['vehicle_types'].items():
-            cv2.putText(frame, f"{vehicle_type}: {count}", (10, y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            y_offset += 30
-        
-        # Konversi frame ke format yang sesuai untuk streaming
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-        
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(),
+    """Video streaming route"""
+    def generate():
+        while True:
+            try:
+                frame = video_queue.get_nowait()
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            except queue.Empty:
+                # If queue is empty, send a blank frame
+                blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                ret, buffer = cv2.imencode('.jpg', blank_frame)
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.1)  # Add small delay to prevent high CPU usage
+
+    return Response(generate(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/get_status')
+@app.route('/start_stream', methods=['POST'])
+def start_stream():
+    """Start video stream from YouTube URL"""
+    youtube_url = request.form.get('youtube_url')
+    if not youtube_url:
+        return jsonify({'error': 'No YouTube URL provided'}), 400
+    
+    try:
+        # Start processing in a separate thread
+        thread = threading.Thread(target=process_youtube_stream,
+                                args=(youtube_url, None))
+        thread.daemon = True
+        thread.start()
+        return jsonify({'message': 'Stream started successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/stop_stream', methods=['POST'])
+def stop_stream():
+    """Stop video stream"""
+    # Clear the video queue
+    while not video_queue.empty():
+        try:
+            video_queue.get_nowait()
+        except queue.Empty:
+            break
+    return jsonify({'message': 'Stream stopped successfully'})
+
+@app.route('/get_status', methods=['GET'])
 def get_status():
+    """Get current traffic status"""
     return jsonify({
-        'traffic_status': current_traffic_status,
-        'vehicle_count': current_vehicle_count,
-        'vehicle_types': current_vehicle_types
+        'traffic_status': 'Normal',  # Replace with actual status
+        'vehicle_count': 0,  # Replace with actual count
+        'vehicle_types': {}  # Replace with actual vehicle types
     })
 
 if __name__ == '__main__':
-    # Buat direktori untuk menyimpan log jika belum ada
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
-    
-    # Mulai thread untuk menangkap frame
-    capture_thread = threading.Thread(target=capture_frames)
-    capture_thread.daemon = True
-    capture_thread.start()
-    
-    # Mulai thread untuk memproses frame
-    process_thread = threading.Thread(target=process_frames)
-    process_thread.daemon = True
-    process_thread.start()
-    
-    # Jalankan aplikasi Flask
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Only for Colab: start ngrok tunnel
+    public_url = ngrok.connect(5000).public_url
+    print(f' * ngrok tunnel: {public_url}')
+    socketio.run(app, debug=False, host='0.0.0.0', port=5000) 

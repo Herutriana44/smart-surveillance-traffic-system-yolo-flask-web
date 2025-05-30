@@ -6,6 +6,29 @@ import yt_dlp
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from models.common import DetectMultiBackend, AutoShape
 import os
+import base64
+from flask import Flask, request, jsonify, render_template, Response
+from flask_socketio import SocketIO
+import threading
+import queue
+import logging
+import subprocess
+import tempfile
+
+# Initialize Flask and SocketIO
+app = Flask(__name__)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global variables for streaming
+stream_queue = queue.Queue(maxsize=10)
+is_streaming = False
+current_stream = None
+current_cap = None
 
 # Area ROI dan parameter lain
 area1 = [(830,280),(830,470),(90,470),(90,280)]
@@ -34,184 +57,176 @@ def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness
     cv2.line(img, (x1, y1), (x1, y1 - line_length), line_color, line_thickness)
     return img
 
-def get_youtube_stream_url(youtube_url, quality='720p', browser='chrome', cookies_file=None):
-    """Extract direct stream URL from YouTube using yt-dlp with browser cookies"""
-    print(f"🔍 Extracting stream URL from YouTube...")
-    
-    # Get the user's home directory
-    home_dir = os.path.expanduser("~")
-    
-    # Define possible browser cookie paths
-    cookie_paths = {
-        'chrome': os.path.join(home_dir, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies'),
-        'firefox': os.path.join(home_dir, 'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles'),
-        'edge': os.path.join(home_dir, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies')
-    }
-    
-    ydl_opts = {
-        'format': f'best[height<={quality[:-1]}]/best',
-        'quiet': True,
-        'no_warnings': True,
-    }
-    
-    # Add cookies options
-    if cookies_file and os.path.exists(cookies_file):
-        print(f"Using cookies from file: {cookies_file}")
-        ydl_opts['cookiefile'] = cookies_file
-    else:
-        print(f"Using cookies from browser: {browser}")
-        ydl_opts['cookiesfrombrowser'] = (browser,)
-    
+def get_youtube_stream_url(youtube_url, quality='720p'):
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=False)
-            if 'url' in info:
-                stream_url = info['url']
-                print(f"✅ Stream URL extracted successfully")
-                print(f"   Title: {info.get('title', 'Unknown')}")
-                return stream_url
-            else:
-                print("❌ Could not extract stream URL")
-                return None
+        logger.info(f"Getting stream URL for: {youtube_url} with quality: {quality}")
+        cmd = [
+            "yt-dlp",
+            "-g",
+            "-f", f"bestvideo[height<={quality[:-1]}]+bestaudio/best[height<={quality[:-1]}]",
+            youtube_url
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"yt-dlp error: {result.stderr}")
+            raise Exception(f"Failed to get stream URL: {result.stderr}")
+            
+        stream_url = result.stdout.strip()
+        logger.info(f"Successfully got stream URL: {stream_url}")
+        return stream_url
     except Exception as e:
-        print(f"❌ Error extracting YouTube URL: {str(e)}")
-        print("\nTroubleshooting tips:")
-        print("1. Make sure you're logged into YouTube in your browser")
-        print("2. Try using a different browser (chrome/firefox/edge)")
-        print("3. If using Chrome, try closing all Chrome windows first")
-        print("4. Check if your browser's cookies are accessible")
-        print("5. If using cookies file, make sure it exists and is in Netscape format")
-        return None
+        logger.error(f"Error getting stream URL: {str(e)}")
+        raise
 
-def process_youtube_stream(youtube_url, output_path=None, weights_path='./weights/yolov9-c.pt', 
-                         classes_path='../configs/coco.names', quality='720p', max_frames=300,
-                         browser='chrome', cookies_file=None):
-    """
-    Process YouTube stream and save to file
-    max_frames: Maximum number of frames to process (default: 300 frames = ~10 seconds at 30fps)
-    browser: Browser to use for cookies (chrome/firefox/edge)
-    cookies_file: Path to cookies.txt file in Netscape format
-    """
-    count_v = 0
-    vihicle_run_time = {}
-    vihicle_in_roi = {}
-    frame_count = 0
+def encode_frame(frame):
+    """Encode frame to base64 for streaming"""
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return base64.b64encode(buffer).decode('utf-8')
 
-    # Get YouTube stream URL with browser cookies
-    stream_url = get_youtube_stream_url(youtube_url, quality, browser, cookies_file)
-    if not stream_url:
-        return False
-
-    cap = cv2.VideoCapture(stream_url)
-    if not cap.isOpened():
-        print("❌ Error: Could not open YouTube stream")
-        return False
-
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-
-    # Setup video writer
-    if not output_path:
-        output_path = 'output.mp4'
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
-
-    print("Loading YOLOv9 model...")
-    tracker = DeepSort(max_age=50)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = DetectMultiBackend(weights=weights_path, device=device, fuse=True)
-    model = AutoShape(model)
-
-    with open(classes_path, "r") as f:
-        class_names = f.read().strip().split("\n")
-    np.random.seed(42)
-    colors = np.random.randint(0, 255, size=(len(class_names), 3))
-
-    print("Starting video processing...")
+def process_frame(frame):
     try:
-        while frame_count < max_frames:
-            ret, frame = cap.read()
+        # Convert to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Apply Gaussian blur
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Apply Canny edge detection
+        edges = cv2.Canny(blurred, 50, 150)
+        # Convert back to BGR for display
+        result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        return result
+    except Exception as e:
+        logger.error(f"Error processing frame: {str(e)}")
+        return frame
+
+def stream_processor():
+    global is_streaming, current_cap
+    
+    while True:
+        if not is_streaming:
+            time.sleep(0.1)
+            continue
+            
+        try:
+            if current_cap is None or not current_cap.isOpened():
+                logger.error("Video capture is not available")
+                is_streaming = False
+                socketio.emit('error', {'message': 'Failed to open video stream'})
+                continue
+
+            ret, frame = current_cap.read()
             if not ret:
-                print("⚠️ Stream ended or connection lost")
-                break
+                logger.error("Failed to read frame")
+                is_streaming = False
+                socketio.emit('error', {'message': 'Failed to read video frame'})
+                continue
 
-            frame_count += 1
-            if frame_count % 10 == 0:
-                print(f"Processing frame {frame_count}/{max_frames}")
+            # Process the frame
+            processed_frame = process_frame(frame)
+            
+            # Convert frame to JPEG
+            _, buffer = cv2.imencode('.jpg', processed_frame)
+            frame_bytes = base64.b64encode(buffer).decode('utf-8')
+            
+            # Send frame through Socket.IO
+            socketio.emit('video_frame', {
+                'frame': frame_bytes,
+                'timestamp': time.time()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in stream processor: {str(e)}")
+            is_streaming = False
+            socketio.emit('error', {'message': f'Streaming error: {str(e)}'})
+            break
 
-            for area in [area1, area2]:
-                frame = cv2.polylines(frame, [np.array(area, np.int32)], True, (255,0,255), 6)
-            cv2.putText(frame, "count : "+str(count_v),(50,50),0, 0.75, (255,255,255),2)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-            results = model(frame)
-            detect = []
-            for det in results.pred[0]:
-                label, confidence, bbox = det[5], det[4], det[:4]
-                x1, y1, x2, y2 = map(int, bbox)
-                class_id = int(label)
-                if CLASS_ID is None:
-                    if confidence < CONF:
-                        continue
-                else:
-                    if class_id != CLASS_ID or confidence < CONF:
-                        continue
-                detect.append([[x1, y1, x2 - x1, y2 - y1], confidence, class_id])
+@app.route('/youtube')
+def youtube():
+    return render_template('index.html')
 
-            tracks = tracker.update_tracks(detect, frame=frame)
-
-            for track in tracks:
-                if not track.is_confirmed():
-                    continue
-                track_id = track.track_id
-                ltrb = track.to_ltrb()
-                class_id = track.get_det_class()
-                x1, y1, x2, y2 = map(int, ltrb)
-                color = colors[class_id]
-                B, G, R = map(int, color)
-                text = f"{track_id} - {class_names[class_id]}"
-                frame = draw_corner_rect(frame, (x1, y1, x2 - x1, y2 - y1), line_length=15, line_thickness=3, rect_thickness=1, rect_color=(B, G, R), line_color=(R, G, B))
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
-                cv2.rectangle(frame, (x1 - 1, y1 - 20), (x1 + len(text) * 10, y1), (B, G, R), -1)
-                cv2.putText(frame, text, (x1 + 5, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-                if BLUR_ID is not None and class_id == BLUR_ID:
-                    if 0 <= x1 < x2 <= frame.shape[1] and 0 <= y1 < y2 <= frame.shape[0]:
-                        frame[y1:y2, x1:x2] = cv2.GaussianBlur(frame[y1:y2, x1:x2], (99, 99), 3)
-
-                centerX = (x1+x2)/2
-                centerY = (y1+y2)/2
-                result = cv2.pointPolygonTest(np.array(area2, np.int32),(int(centerX),int(centerY)), False)
-                if result >= 0:
-                    vihicle_in_roi[track_id] = time.time()
-
-                if track_id in vihicle_in_roi:
-                    result = cv2.pointPolygonTest(np.array(area1, np.int32),(int(centerX),int(centerY)), False)
-                    if result >= 0:
-                        elapsed_time = time.time() - vihicle_in_roi[track_id]
-                        if track_id not in vihicle_run_time:
-                            vihicle_run_time[track_id] = elapsed_time
-                            count_v += 1
-                        if track_id in vihicle_run_time:
-                            elapsed_time = vihicle_run_time[track_id]
-                        distance = 50
-                        speed_ms = distance / elapsed_time
-                        speed_kh = speed_ms * 3.6
-                        speed_txt = " Speed : " + str(int(speed_kh)) + "Km/h"
-                        text = f"{track_id} - {class_names[class_id]} - {str(speed_txt)}"
-                        frame = draw_corner_rect(frame, (x1, y1, x2 - x1, y2 - y1), line_length=15, line_thickness=3, rect_thickness=1, rect_color=(B, G, R), line_color=(R, G, B))
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
-                        cv2.rectangle(frame, (x1 - 1, y1 - 20), (x1 + len(text) * 10, y1), (B, G, R), -1)
-                        cv2.putText(frame, text, (x1 + 5, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-            writer.write(frame)
-
-    except Exception as e:
-        print(f"❌ Error during processing: {str(e)}")
-        return False
-    finally:
-        cap.release()
-        writer.release()
-        print(f"✅ Processing completed. Saved {frame_count} frames to {output_path}")
+@app.route('/process_youtube', methods=['POST'])
+def process_youtube():
+    global is_streaming, current_cap, current_stream
     
-    return True 
+    try:
+        youtube_url = request.form.get('youtube_url')
+        quality = request.form.get('quality', '720p')
+        
+        if not youtube_url:
+            return jsonify({'error': 'No YouTube URL provided'}), 400
+            
+        logger.info(f"Processing YouTube URL: {youtube_url}")
+        
+        # Get stream URL
+        stream_url = get_youtube_stream_url(youtube_url, quality)
+        logger.info(f"Got stream URL: {stream_url}")
+        
+        # Stop any existing stream
+        if current_cap is not None:
+            current_cap.release()
+        
+        # Initialize new video capture
+        current_cap = cv2.VideoCapture(stream_url)
+        if not current_cap.isOpened():
+            raise Exception("Failed to open video stream")
+            
+        current_stream = stream_url
+        is_streaming = True
+        
+        # Start processing thread if not already running
+        if not any(t.name == 'StreamProcessor' for t in threading.enumerate()):
+            processor = threading.Thread(target=stream_processor, name='StreamProcessor')
+            processor.daemon = True
+            processor.start()
+        
+        return jsonify({
+            'message': 'Stream started successfully',
+            'stream_url': stream_url
+        })
+        
+    except Exception as e:
+        logger.error(f"Error processing YouTube stream: {str(e)}")
+        is_streaming = False
+        if current_cap is not None:
+            current_cap.release()
+            current_cap = None
+        return jsonify({'error': str(e)}), 500
+
+@socketio.on('stop_stream')
+def stop_stream():
+    global is_streaming, current_cap
+    logger.info("Stopping stream...")
+    is_streaming = False
+    if current_cap is not None:
+        current_cap.release()
+        current_cap = None
+    socketio.emit('processing_complete', {'message': 'Stream stopped'})
+
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+
+@socketio.on('start_stream')
+def handle_start_stream(data):
+    youtube_url = data.get('url')
+    if youtube_url:
+        process_youtube_stream(youtube_url)
+        return {'status': 'success', 'message': 'Streaming started'}
+    return {'status': 'error', 'message': 'No YouTube URL provided'}
+
+@socketio.on('stop_stream')
+def handle_stop_stream():
+    global is_streaming
+    is_streaming = False
+    return {'status': 'success', 'message': 'Streaming stopped'}
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True) 
