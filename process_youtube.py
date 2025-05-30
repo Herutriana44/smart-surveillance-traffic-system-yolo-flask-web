@@ -89,6 +89,9 @@ def encode_frame(frame):
 
 def process_frame(frame):
     try:
+        # Log frame information
+        logger.info(f"Processing frame with shape: {frame.shape}")
+        
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # Apply Gaussian blur
@@ -97,6 +100,8 @@ def process_frame(frame):
         edges = cv2.Canny(blurred, 50, 150)
         # Convert back to BGR for display
         result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        
+        logger.info(f"Processed frame shape: {result.shape}")
         return result
     except Exception as e:
         logger.error(f"Error processing frame: {str(e)}")
@@ -128,6 +133,8 @@ def stream_processor():
             # Convert raw frame data to numpy array
             frame = np.frombuffer(frame_data, dtype=np.uint8)
             frame = frame.reshape((1080, 1920, 3))  # Reshape to video dimensions
+            
+            logger.info(f"Frame shape: {frame.shape}, dtype: {frame.dtype}")
 
             # Process the frame
             processed_frame = process_frame(frame)
@@ -141,6 +148,8 @@ def stream_processor():
                 'frame': frame_bytes,
                 'timestamp': time.time()
             })
+            
+            logger.info("Frame sent successfully")
             
         except Exception as e:
             logger.error(f"Error in stream processor: {str(e)}")
@@ -187,8 +196,11 @@ def process_youtube_stream(youtube_url, output_path=None, quality='720p', browse
             '-f', 'rawvideo',
             '-pix_fmt', 'bgr24',
             '-vsync', '0',
+            '-vf', 'scale=1280:720',  # Scale to 720p
             '-'
         ]
+        
+        logger.info(f"Starting FFmpeg with command: {' '.join(ffmpeg_cmd)}")
         
         current_process = subprocess.Popen(
             ffmpeg_cmd,
