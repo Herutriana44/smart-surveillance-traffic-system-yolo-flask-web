@@ -249,9 +249,3 @@ def upload_file_socket():
 @app.route('/processed/<filename>')
 def processed_video(filename):
     return send_file(os.path.join(app.config['PROCESSED_FOLDER'], filename))
-
-if __name__ == '__main__':
-    # Only for Colab: start ngrok tunnel
-    public_url = ngrok.connect(5000).public_url
-    print(f' * ngrok tunnel: {public_url}')
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000) 
