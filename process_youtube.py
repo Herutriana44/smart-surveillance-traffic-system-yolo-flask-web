@@ -9,11 +9,13 @@ import os
 import base64
 from flask import Flask, request, jsonify, render_template, Response
 from flask_socketio import SocketIO
+from flask_cors import CORS
 import threading
 import queue
 import logging
 import subprocess
 import tempfile
+import ffmpeg
 
 # Initialize Flask and SocketIO
 app = Flask(__name__)
@@ -29,6 +31,7 @@ stream_queue = queue.Queue(maxsize=10)
 is_streaming = False
 current_stream = None
 current_cap = None
+current_process = None
 
 # Area ROI dan parameter lain
 area1 = [(830,280),(830,470),(90,470),(90,280)]
@@ -100,7 +103,7 @@ def process_frame(frame):
         return frame
 
 def stream_processor():
-    global is_streaming, current_cap
+    global is_streaming, current_cap, current_process
     
     while True:
         if not is_streaming:
@@ -108,18 +111,23 @@ def stream_processor():
             continue
             
         try:
-            if current_cap is None or not current_cap.isOpened():
-                logger.error("Video capture is not available")
+            if current_process is None:
+                logger.error("FFmpeg process is not available")
                 is_streaming = False
                 socketio.emit('error', {'message': 'Failed to open video stream'})
                 continue
 
-            ret, frame = current_cap.read()
-            if not ret:
-                logger.error("Failed to read frame")
+            # Read frame from FFmpeg process
+            frame_data = current_process.stdout.read(1920 * 1080 * 3)  # Read raw frame data
+            if not frame_data:
+                logger.error("Failed to read frame from FFmpeg")
                 is_streaming = False
                 socketio.emit('error', {'message': 'Failed to read video frame'})
                 continue
+
+            # Convert raw frame data to numpy array
+            frame = np.frombuffer(frame_data, dtype=np.uint8)
+            frame = frame.reshape((1080, 1920, 3))  # Reshape to video dimensions
 
             # Process the frame
             processed_frame = process_frame(frame)
@@ -139,6 +147,80 @@ def stream_processor():
             is_streaming = False
             socketio.emit('error', {'message': f'Streaming error: {str(e)}'})
             break
+
+def process_youtube_stream(youtube_url, output_path=None, quality='720p', browser='chrome', cookies_file=None):
+    """
+    Process YouTube stream and either save to file or stream via Socket.IO
+    
+    Args:
+        youtube_url (str): The YouTube URL to process
+        output_path (str, optional): If provided, save processed video to this path
+        quality (str): Video quality (e.g., '720p', '1080p')
+        browser (str): Browser to use for cookies (default: 'chrome')
+        cookies_file (str, optional): Path to cookies file
+    
+    Returns:
+        bool: True if processing started successfully, False otherwise
+    """
+    global is_streaming, current_cap, current_stream, current_process
+    
+    try:
+        logger.info(f"Starting YouTube stream processing for URL: {youtube_url}")
+        
+        # Get stream URL
+        stream_url = get_youtube_stream_url(youtube_url, quality)
+        if not stream_url:
+            logger.error("Could not extract YouTube stream URL")
+            return False
+            
+        logger.info(f"Successfully got stream URL: {stream_url}")
+        
+        # Stop any existing stream
+        if current_process is not None:
+            current_process.terminate()
+            current_process = None
+        
+        # Start FFmpeg process to handle HLS stream
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-i', stream_url,
+            '-f', 'rawvideo',
+            '-pix_fmt', 'bgr24',
+            '-vsync', '0',
+            '-'
+        ]
+        
+        current_process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=10**8
+        )
+        
+        if current_process.poll() is not None:
+            error = current_process.stderr.read().decode()
+            logger.error(f"FFmpeg process failed to start: {error}")
+            return False
+            
+        current_stream = stream_url
+        is_streaming = True
+        
+        # Start processing thread if not already running
+        if not any(t.name == 'StreamProcessor' for t in threading.enumerate()):
+            processor = threading.Thread(target=stream_processor, name='StreamProcessor')
+            processor.daemon = True
+            processor.start()
+            
+        logger.info("Stream processing started successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error in process_youtube_stream: {str(e)}")
+        is_streaming = False
+        if current_process is not None:
+            current_process.terminate()
+            current_process = None
+        return False
 
 @app.route('/')
 def index():
@@ -198,12 +280,12 @@ def process_youtube():
 
 @socketio.on('stop_stream')
 def stop_stream():
-    global is_streaming, current_cap
+    global is_streaming, current_process
     logger.info("Stopping stream...")
     is_streaming = False
-    if current_cap is not None:
-        current_cap.release()
-        current_cap = None
+    if current_process is not None:
+        current_process.terminate()
+        current_process = None
     socketio.emit('processing_complete', {'message': 'Stream stopped'})
 
 @socketio.on('connect')
