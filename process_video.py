@@ -118,7 +118,7 @@ def process_video(input_path, output_dir):
     print("Loading YOLOv9 model...")
     tracker = DeepSort(max_age=50)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = DetectMultiBackend(weights='./weights/yolov9-c.pt', device=device, fuse=True)
+    model = DetectMultiBackend(weights='best.pt', device=device, fuse=True)
     model = AutoShape(model)
 
     with open('../configs/coco.names', "r") as f:

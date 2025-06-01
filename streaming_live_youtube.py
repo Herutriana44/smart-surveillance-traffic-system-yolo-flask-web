@@ -72,10 +72,10 @@ def generate_frames_from_stream(stream_url):
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
 
-    print("Loading YOLOv9 model...")
+    print("Loading YOLO model...")
     tracker = DeepSort(max_age=50)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = DetectMultiBackend(weights='./weights/yolov9-c.pt', device=device, fuse=True)
+    model = DetectMultiBackend(weights='best.pt', device=device, fuse=True)
     model = AutoShape(model)
 
     with open('../configs/coco.names', "r") as f:
