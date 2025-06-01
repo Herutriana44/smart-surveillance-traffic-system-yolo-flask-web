@@ -33,10 +33,10 @@ current_cap = None
 def get_youtube_stream_url(youtube_url, quality='720p'):
     try:
         logger.info(f"Getting stream URL for: {youtube_url} with quality: {quality}")
-        ydl_opts = {
+    ydl_opts = {
             'format': f'bestvideo[height<={quality[:-1]}]+bestaudio/best[height<={quality[:-1]}]',
-            'quiet': True,
-            'no_warnings': True,
+        'quiet': True,
+        'no_warnings': True,
             'extract_flat': True,
         }
         
@@ -120,16 +120,16 @@ def process_youtube(youtube_url, output_path=None, quality='720p', browser='chro
     try:
         if not youtube_url:
             logger.error("No YouTube URL provided")
-            return False
-            
+        return False
+
         logger.info(f"Starting YouTube stream processing for URL: {youtube_url}")
         
         # Get stream URL
         stream_url = get_youtube_stream_url(youtube_url, quality)
         if not stream_url:
             logger.error("Could not extract YouTube stream URL")
-            return False
-            
+        return False
+
         logger.info(f"Successfully got stream URL: {stream_url}")
         
         # Stop any existing stream
@@ -201,7 +201,7 @@ def process_youtube(youtube_url, output_path=None, quality='720p', browser='chro
             
         logger.info("Stream processing started successfully")
         return True
-        
+
     except Exception as e:
         logger.error(f"Error in process_youtube: {str(e)}")
         is_streaming = False

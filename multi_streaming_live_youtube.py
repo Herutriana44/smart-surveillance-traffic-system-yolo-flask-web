@@ -49,7 +49,11 @@ def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness
 app = Flask(__name__)
 CORS(app)
 
-YOUTUBE_LIVE_URL = "https://www.youtube.com/watch?v=6QL0RHNtOlo"  # ganti sesuai live stream
+YOUTUBE_LIVE_URLS = {
+    "Stream 1": "https://www.youtube.com/watch?v=6QL0RHNtOlo",
+    "Stream 2": "https://www.youtube.com/watch?v=YOUR_SECOND_STREAM_ID",
+    "Stream 3": "https://www.youtube.com/watch?v=YOUR_THIRD_STREAM_ID"
+}
 
 def get_youtube_live_url(youtube_url):
     # Gunakan yt_dlp untuk dapatkan HLS m3u8 URL dari YouTube Live
@@ -200,18 +204,46 @@ def generate_frames_from_stream(stream_url):
 def index():
     return render_template_string("""
     <html>
-    <head><title>YouTube Live Grayscale Stream</title></head>
+    <head>
+        <title>Multiple YouTube Live Streams</title>
+        <style>
+            .stream-container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                justify-content: center;
+                padding: 20px;
+            }
+            .stream-box {
+                border: 1px solid #ccc;
+                padding: 10px;
+                border-radius: 5px;
+                background-color: #f5f5f5;
+            }
+            h2 {
+                text-align: center;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
     <body>
-        <h1>Streaming YouTube Live (Grayscale)</h1>
-        <img src="/video_feed" width="640" />
+        <h1>Multiple YouTube Live Streams</h1>
+        <div class="stream-container">
+            {% for stream_name in stream_names %}
+            <div class="stream-box">
+                <h2>{{ stream_name }}</h2>
+                <img src="/video_feed/{{ loop.index0 }}" width="640" />
+            </div>
+            {% endfor %}
+        </div>
     </body>
     </html>
-    """)
+    """, stream_names=YOUTUBE_LIVE_URLS.keys())
 
-@app.route('/video_feed')
-def video_feed():
+@app.route('/video_feed/<int:stream_index>')
+def video_feed(stream_index):
     try:
-        stream_url = get_youtube_live_url(YOUTUBE_LIVE_URL)
+        stream_url = get_youtube_live_url(list(YOUTUBE_LIVE_URLS.values())[stream_index])
         return Response(generate_frames_from_stream(stream_url),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:

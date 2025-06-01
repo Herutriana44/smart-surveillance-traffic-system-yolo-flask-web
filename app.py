@@ -156,49 +156,49 @@ def download_file(filename):
 @app.route('/process_youtube', methods=['POST'])
 def handle_youtube_stream():
     try:
-        if 'youtube_url' not in request.form:
+    if 'youtube_url' not in request.form:
             print("Error: No YouTube URL provided in request")
-            return jsonify({'error': 'No YouTube URL provided'}), 400
-        
-        youtube_url = request.form['youtube_url']
-        quality = request.form.get('quality', '720p')
-        browser = request.form.get('browser', 'chrome')  # Default to Chrome
-        
-        if not youtube_url:
+        return jsonify({'error': 'No YouTube URL provided'}), 400
+    
+    youtube_url = request.form['youtube_url']
+    quality = request.form.get('quality', '720p')
+    browser = request.form.get('browser', 'chrome')  # Default to Chrome
+    
+    if not youtube_url:
             print("Error: Empty YouTube URL")
-            return jsonify({'error': 'Empty YouTube URL'}), 400
-        
+        return jsonify({'error': 'Empty YouTube URL'}), 400
+    
         print(f"Processing YouTube URL: {youtube_url}")
         print(f"Quality: {quality}")
         print(f"Browser: {browser}")
         
-        # Handle cookies file upload
-        cookies_file = None
-        if 'cookies_file' in request.files:
-            cookies = request.files['cookies_file']
-            if cookies.filename:
-                # Save cookies file temporarily
-                cookies_path = os.path.join(app.config['UPLOAD_FOLDER'], 'cookies.txt')
-                cookies.save(cookies_path)
-                cookies_file = cookies_path
+    # Handle cookies file upload
+    cookies_file = None
+    if 'cookies_file' in request.files:
+        cookies = request.files['cookies_file']
+        if cookies.filename:
+            # Save cookies file temporarily
+            cookies_path = os.path.join(app.config['UPLOAD_FOLDER'], 'cookies.txt')
+            cookies.save(cookies_path)
+            cookies_file = cookies_path
                 print(f"Using cookies file: {cookies_path}")
-        
-        try:
+    
+    try:
             # Process the YouTube stream without saving to file
             success = process_youtube(
-                youtube_url=youtube_url,
-                quality=quality,
-                browser=browser,
-                cookies_file=cookies_file
-            )
-            
-            if success:
+            youtube_url=youtube_url,
+            quality=quality,
+            browser=browser,
+            cookies_file=cookies_file
+        )
+        
+        if success:
                 print("YouTube stream processing started successfully")
-                return jsonify({
-                    'success': True,
+            return jsonify({
+                'success': True,
                     'message': 'Stream processing started successfully'
-                })
-            else:
+            })
+        else:
                 print("Failed to start YouTube stream processing")
                 return jsonify({
                     'success': False,
