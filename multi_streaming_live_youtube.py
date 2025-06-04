@@ -1,6 +1,6 @@
 import cv2
 import subprocess
-from flask import Flask, Response, render_template_string, jsonify
+from flask import Flask, Response, render_template, jsonify, request
 from flask_cors import CORS
 from pyngrok import ngrok
 import cv2
@@ -238,152 +238,18 @@ def generate_frames_from_stream(stream_url, stream_name):
 
 @app.route('/')
 def index():
-    return render_template_string("""
-    <html>
-    <head>
-        <title>Multi-Stream Traffic Monitoring</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                margin: 20px;
-                background-color: #f0f0f0;
-            }
-            .container {
-                max-width: 1800px;
-                margin: 0 auto;
-                background-color: white;
-                padding: 20px;
-                border-radius: 10px;
-                box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            }
-            h1 {
-                color: #333;
-                text-align: center;
-                margin-bottom: 30px;
-            }
-            .streams-grid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 20px;
-                margin-bottom: 30px;
-            }
-            .stream-card {
-                background-color: white;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                overflow: hidden;
-            }
-            .stream-card h2 {
-                margin: 0;
-                padding: 15px;
-                background-color: #333;
-                color: white;
-                font-size: 1.2em;
-            }
-            .video-container {
-                position: relative;
-                width: 100%;
-            }
-            .video-container img {
-                width: 100%;
-                height: auto;
-                display: block;
-            }
-            .status-container {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                padding: 15px;
-                background-color: #f8f9fa;
-            }
-            .status-card {
-                padding: 10px;
-                border-radius: 8px;
-                background-color: white;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            }
-            .status-card h3 {
-                margin: 0 0 5px 0;
-                color: #333;
-                font-size: 0.9em;
-            }
-            .status-value {
-                font-size: 1.1em;
-                font-weight: bold;
-            }
-            .status-aman { color: #28a745; }
-            .status-kecelakaan { color: #dc3545; }
-            .status-macet { color: #dc3545; }
-            .status-lancar { color: #28a745; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Multi-Stream Traffic Monitoring System</h1>
-            <div class="streams-grid">
-                {% for stream_name in stream_names %}
-                <div class="stream-card">
-                    <h2>{{ stream_name }}</h2>
-                    <div class="video-container">
-                        <img src="/video_feed/{{ stream_name }}" />
-                    </div>
-                    <div class="status-container">
-                        <div class="status-card">
-                            <h3>Kondisi Lalu Lintas</h3>
-                            <div id="traffic-status-{{ stream_name }}" class="status-value">Loading...</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>Status Lalu Lintas</h3>
-                            <div id="congestion-status-{{ stream_name }}" class="status-value">Loading...</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>Jumlah Kendaraan</h3>
-                            <div id="vehicle-count-{{ stream_name }}" class="status-value">Loading...</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>Total Kecelakaan</h3>
-                            <div id="accident-count-{{ stream_name }}" class="status-value">Loading...</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>Lubang Jalan</h3>
-                            <div id="pothole-count-{{ stream_name }}" class="status-value">Loading...</div>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        <script>
-            function updateStatus() {
-                fetch('/traffic_data')
-                    .then(response => response.json())
-                    .then(data => {
-                        Object.keys(data).forEach(streamName => {
-                            const streamData = data[streamName];
-                            
-                            // Update traffic condition
-                            document.getElementById(`traffic-status-${streamName}`).textContent = streamData.traffic_status;
-                            document.getElementById(`traffic-status-${streamName}`).className = 
-                                'status-value status-' + streamData.traffic_status.toLowerCase();
-                            
-                            // Update congestion status
-                            const congestionStatus = streamData.is_congested ? 'MACET' : 'LANCAR';
-                            document.getElementById(`congestion-status-${streamName}`).textContent = congestionStatus;
-                            document.getElementById(`congestion-status-${streamName}`).className = 
-                                'status-value status-' + congestionStatus.toLowerCase();
-                            
-                            // Update other values
-                            document.getElementById(`vehicle-count-${streamName}`).textContent = streamData.current_vehicles;
-                            document.getElementById(`accident-count-${streamName}`).textContent = streamData.accident_count;
-                            document.getElementById(`pothole-count-${streamName}`).textContent = streamData.pothole_count;
-                        });
-                    });
-            }
-            setInterval(updateStatus, 1000);
-        </script>
-    </body>
-    </html>
-    """, stream_names=YOUTUBE_LIVE_URLS.keys())
+    return render_template('landing.html')
+
+@app.route('/monitoring')
+def monitoring():
+    return render_template('monitoring.html', stream_names=YOUTUBE_LIVE_URLS.keys())
+
+@app.route('/single-stream')
+def single_stream():
+    stream_name = request.args.get('url')
+    if stream_name not in YOUTUBE_LIVE_URLS:
+        return "Stream not found", 404
+    return render_template('single_stream.html', stream_name=stream_name)
 
 @app.route('/video_feed/<stream_name>')
 def video_feed(stream_name):

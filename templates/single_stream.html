@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Single Stream Traffic Monitoring</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin: 0;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            color: #007bff;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+
+        .nav-links a:hover {
+            background-color: #e9ecef;
+        }
+
+        .stream-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+
+        .video-section {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .video-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .stats-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .stats-card {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        .stats-card h2 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 1.2em;
+        }
+
+        .stat-item {
+            margin-bottom: 15px;
+        }
+
+        .stat-item h3 {
+            margin: 0 0 5px 0;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .stat-value {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .status-aman {
+            color: #28a745;
+        }
+
+        .status-kecelakaan {
+            color: #dc3545;
+        }
+
+        .status-macet {
+            color: #dc3545;
+        }
+
+        .status-lancar {
+            color: #28a745;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Single Stream Traffic Monitoring</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/monitoring">Back to Multi-Stream</a>
+            </div>
+        </div>
+        <div class="stream-container">
+            <div class="video-section">
+                <div class="video-container">
+                    <img src="/video_feed/{{ stream_name }}" />
+                </div>
+            </div>
+            <div class="stats-section">
+                <div class="stats-card">
+                    <h2>Traffic Status</h2>
+                    <div class="stat-item">
+                        <h3>Kondisi Lalu Lintas</h3>
+                        <div id="traffic-status" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-item">
+                        <h3>Status Lalu Lintas</h3>
+                        <div id="congestion-status" class="stat-value">Loading...</div>
+                    </div>
+                </div>
+                <div class="stats-card">
+                    <h2>Vehicle Statistics</h2>
+                    <div class="stat-item">
+                        <h3>Jumlah Kendaraan</h3>
+                        <div id="vehicle-count" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-item">
+                        <h3>Total Kecelakaan</h3>
+                        <div id="accident-count" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-item">
+                        <h3>Lubang Jalan</h3>
+                        <div id="pothole-count" class="stat-value">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function updateStatus() {
+            fetch('/traffic_data')
+                .then(response => response.json())
+                .then(data => {
+                    const streamData = data['{{ stream_name }}'];
+                    if (streamData) {
+                        // Update traffic condition
+                        document.getElementById('traffic-status').textContent = streamData.traffic_status;
+                        document.getElementById('traffic-status').className =
+                            'stat-value status-' + streamData.traffic_status.toLowerCase();
+
+                        // Update congestion status
+                        const congestionStatus = streamData.is_congested ? 'MACET' : 'LANCAR';
+                        document.getElementById('congestion-status').textContent = congestionStatus;
+                        document.getElementById('congestion-status').className =
+                            'stat-value status-' + congestionStatus.toLowerCase();
+
+                        // Update other values
+                        document.getElementById('vehicle-count').textContent = streamData.current_vehicles;
+                        document.getElementById('accident-count').textContent = streamData.accident_count;
+                        document.getElementById('pothole-count').textContent = streamData.pothole_count;
+                    }
+                });
+        }
+        setInterval(updateStatus, 1000);
+    </script>
+</body>
+
+</html>
