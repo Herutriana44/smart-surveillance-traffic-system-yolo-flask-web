@@ -1,0 +1,32 @@
+[
+    {
+        "nama_lengkap": "Heru Triana",
+        "universitas": "Universitas Singaperbangsa Karawang",
+        "prodi": "Informatika",
+        "image": "heru.JPG"
+    },
+    {
+        "nama_lengkap": "Maher Ismail Sungkar",
+        "universitas": "Universitas Bina Sarana Informatika",
+        "prodi": "Sistem Informasi",
+        "image": "maher.jpg"
+    },
+    {
+        "nama_lengkap": "Devon",
+        "universitas": "Universitas Bunda Mulia",
+        "prodi": "Ilmu Komunikasi",
+        "image": "devon.jpg"
+    },
+    {
+        "nama_lengkap": "Jahrina",
+        "universitas": "Universitas Sultan Ageng Tirtayasa",
+        "prodi": "Manajemen",
+        "image": "jahrina.jpg"
+    },
+    {
+        "nama_lengkap": "Aqiqiy Salimuzzaakiy ",
+        "universitas": "Universitas Jenderal Soedirman",
+        "prodi": "Fisika",
+        "image": "aqiqiy.jpg"
+    }
+]

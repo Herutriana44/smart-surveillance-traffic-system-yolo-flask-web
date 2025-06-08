@@ -1,6 +1,6 @@
 import cv2
 import subprocess
-from flask import Flask, Response, render_template, jsonify, request
+from flask import Flask, Response, render_template, jsonify, request, send_from_directory
 from flask_cors import CORS
 from pyngrok import ngrok
 import cv2
@@ -14,6 +14,7 @@ import os
 import uuid
 from datetime import datetime
 import threading
+import json
 
 
 # Area ROI dan parameter lain
@@ -68,8 +69,17 @@ def draw_corner_rect(img, bbox, line_length=30, line_thickness=5, rect_thickness
     cv2.line(img, (x1, y1), (x1, y1 - line_length), line_color, line_thickness)
     return img
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/static')
 CORS(app)
+
+# Load team profile data
+def load_team_profiles():
+    try:
+        with open('static/profile_team.json', 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading team profiles: {e}")
+        return []
 
 def get_youtube_live_url(youtube_url):
     result = subprocess.run([
@@ -238,7 +248,8 @@ def generate_frames_from_stream(stream_url, stream_name):
 
 @app.route('/')
 def index():
-    return render_template('landing.html')
+    team_profiles = load_team_profiles()
+    return render_template('landing.html', team_profiles=team_profiles)
 
 @app.route('/monitoring')
 def monitoring():

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Surveillance Traffic System (SSTS)</title>
+    <title>Smart Surveillance Traffic System (SSTS) - Astranauts by Astra</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -62,6 +62,19 @@
             padding: 15px;
             border-radius: 5px;
             text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .team-member:hover {
+            transform: translateY(-5px);
+        }
+
+        .team-member img {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 15px;
         }
 
         .cta-button {
@@ -77,12 +90,39 @@
         .cta-button:hover {
             background-color: #0056b3;
         }
+
+        .competition-badge {
+            background-color: #ff6b6b;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-list li {
+            margin: 10px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .feature-list li:before {
+            content: "✓";
+            color: #28a745;
+            position: absolute;
+            left: 0;
+        }
     </style>
 </head>
 
 <body>
     <div class="header">
-        <h1>Smart Surveillance Traffic System (SSTS)</h1>
+        <h1>Smart Surveillance Traffic System (SSTS) <span class="competition-badge">Astranauts by Astra</span></h1>
         <p>Advanced Traffic Monitoring and Analysis System</p>
     </div>
 
@@ -98,14 +138,16 @@
     <div class="container">
         <div class="section" id="about">
             <h2>About SSTS</h2>
-            <p>SSTS is an innovative traffic monitoring system that utilizes advanced computer vision and deep learning
-                technologies to provide real-time traffic analysis. Our system offers:</p>
-            <ul>
-                <li>Real-time vehicle detection and tracking</li>
-                <li>Traffic congestion monitoring</li>
-                <li>Accident detection</li>
-                <li>Road condition monitoring (potholes)</li>
+            <p>SSTS is an innovative traffic monitoring system developed for the Astranauts by Astra competition. Our
+                system utilizes advanced computer vision and deep learning technologies to provide real-time traffic
+                analysis and improve road safety in Demak Regency. Our system offers:</p>
+            <ul class="feature-list">
+                <li>Real-time vehicle detection and tracking using YOLO and DeepSORT</li>
+                <li>Intelligent traffic congestion monitoring and analysis</li>
+                <li>Automated accident detection and alert system</li>
+                <li>Road condition monitoring with pothole detection</li>
                 <li>Multi-stream support for comprehensive coverage</li>
+                <li>Real-time traffic status updates and statistics</li>
             </ul>
             <a href="/monitoring" class="cta-button">Start Monitoring</a>
         </div>
@@ -113,33 +155,23 @@
         <div class="section" id="team">
             <h2>Development Team</h2>
             <div class="team-grid">
+                {% for member in team_profiles %}
                 <div class="team-member">
-                    <h3>Team Member 1</h3>
-                    <p>Role: Project Manager</p>
-                    <p>Institution: DISHUB KAB. DEMAK</p>
+                    <img src="{{ url_for('static', filename='images/' + member.image) }}"
+                        alt="{{ member.nama_lengkap }}">
+                    <h3>{{ member.nama_lengkap }}</h3>
+                    <p>{{ member.universitas }}</p>
+                    <p>{{ member.prodi }}</p>
                 </div>
-                <div class="team-member">
-                    <h3>Team Member 2</h3>
-                    <p>Role: Lead Developer</p>
-                    <p>Institution: DISHUB KAB. DEMAK</p>
-                </div>
-                <div class="team-member">
-                    <h3>Team Member 3</h3>
-                    <p>Role: AI/ML Engineer</p>
-                    <p>Institution: DISHUB KAB. DEMAK</p>
-                </div>
-                <div class="team-member">
-                    <h3>Team Member 4</h3>
-                    <p>Role: System Architect</p>
-                    <p>Institution: DISHUB KAB. DEMAK</p>
-                </div>
+                {% endfor %}
             </div>
         </div>
 
         <div class="section">
             <h2>Institution</h2>
             <p>This project is developed in collaboration with DISHUB KAB. DEMAK, dedicated to improving traffic
-                management and safety in Demak Regency.</p>
+                management and safety in Demak Regency. As part of the Astranauts by Astra competition, we aim to create
+                innovative solutions for real-world traffic challenges.</p>
         </div>
     </div>
 </body>
