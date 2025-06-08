@@ -157,7 +157,7 @@
             <div class="team-grid">
                 {% for member in team_profiles %}
                 <div class="team-member">
-                    <img src="{{ url_for('static', filename='images/' + member.image) }}"
+                    <img src="{{ url_for('static', filename='image/' + member.image) }}"
                         alt="{{ member.nama_lengkap }}">
                     <h3>{{ member.nama_lengkap }}</h3>
                     <p>{{ member.universitas }}</p>
