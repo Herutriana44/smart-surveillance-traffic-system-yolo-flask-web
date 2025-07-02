@@ -10,7 +10,7 @@ Aplikasi web Flask untuk pemrosesan video traffic surveillance menggunakan YOLOv
 - Preview hasil pemrosesan video
 - Download video hasil pemrosesan
 
-## Cara Menjalankan di Google Colab
+## Cara Menjalankan di Google Colab atau bisa klik [Link Ini](https://colab.research.google.com/drive/1GgL3sdJkV7JTJ6HbIItKLPIKQGX_0bUK?usp=sharing)
 
 ### 1. Setup Environment
 
